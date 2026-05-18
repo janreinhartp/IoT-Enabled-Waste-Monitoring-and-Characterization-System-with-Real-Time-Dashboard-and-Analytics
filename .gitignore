@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+
+# App data (database, captured images, models)
+data/*.db
+data/*.sqlite*
+data/images/*
+!data/images/.gitkeep
+app/ai/models/*.tflite
+app/ai/models/*.txt
+
+# Local config overrides
+config.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store

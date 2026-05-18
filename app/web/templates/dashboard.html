@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Waste Monitor{% endblock %}
+
+{% block content %}
+<section class="grid">
+  <div class="card live-weight">
+    <div class="label">Live Weight</div>
+    <div class="value" id="live-weight">0.0 <span class="unit">g</span></div>
+    <div class="state" id="live-state">waiting…</div>
+  </div>
+
+  <div class="card latest-item">
+    <div class="label">Latest Item</div>
+    <div id="latest-card">
+      {% if recent %}
+        {% set e = recent[0] %}
+        <img id="latest-img" src="{{ url_for('event_image', event_id=e.id) }}" alt="latest">
+        <div class="latest-info">
+          <div class="latest-label" id="latest-label">{{ e.detected_label }}</div>
+          <div class="latest-cat" id="latest-cat">{{ e.waste_category }}</div>
+          <div class="latest-weight" id="latest-weight">{{ '%.1f'|format(e.weight_grams) }} g</div>
+          <div class="latest-conf" id="latest-conf">conf {{ '%.0f'|format(e.confidence*100) }}%</div>
+        </div>
+      {% else %}
+        <p>No events yet. Place something on the scale.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Recent Events</h2>
+  <table id="events-table">
+    <thead>
+      <tr><th>#</th><th>Time</th><th>Label</th><th>Category</th><th>Weight (g)</th><th>Confidence</th><th>Image</th></tr>
+    </thead>
+    <tbody>
+      {% for e in recent %}
+      <tr data-id="{{ e.id }}">
+        <td>{{ e.id }}</td>
+        <td>{{ e.timestamp }}</td>
+        <td>{{ e.detected_label }}</td>
+        <td>{{ e.waste_category }}</td>
+        <td>{{ '%.1f'|format(e.weight_grams) }}</td>
+        <td>{{ '%.0f'|format(e.confidence*100) }}%</td>
+        <td><a href="{{ url_for('event_image', event_id=e.id) }}" target="_blank">view</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,7 @@
+# Raspberry Pi-only dependencies. Install on the Pi with:
+#   pip install -r requirements.txt -r requirements-pi.txt
+-r requirements.txt
+
+adafruit-circuitpython-nau7802>=1.0
+adafruit-blinka>=8.0
+tflite-runtime>=2.14; platform_machine == "aarch64" or platform_machine == "armv7l"
