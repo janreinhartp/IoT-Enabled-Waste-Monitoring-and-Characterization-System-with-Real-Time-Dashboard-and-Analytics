@@ -115,7 +115,6 @@ def register(app: Flask, socketio: SocketIO, cfg: AppConfig, db: Database) -> No
 
     @app.get("/images/<int:event_id>")
     def event_image(event_id: int):
-        events = db.list_events(limit=1, offset=0)  # not used, kept for symmetry
         # Look up the event directly
         with db.session() as s:
             from app.core.db import WasteEvent  # local import
