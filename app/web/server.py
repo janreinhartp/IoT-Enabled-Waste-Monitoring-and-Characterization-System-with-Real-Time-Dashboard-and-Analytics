@@ -28,7 +28,7 @@ def create_app(
     app.config["WASTE_CONFIG"] = cfg
     app.config["WASTE_DB"] = db
 
-    socketio = SocketIO(app, cors_allowed_origins="*", async_mode=async_mode)
+    socketio = SocketIO(app, async_mode=async_mode)
 
     # Register routes (import here to avoid circular imports)
     from . import routes  # noqa: WPS433
