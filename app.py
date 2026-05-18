@@ -47,7 +47,7 @@ class USBCamera:
         self.capture_dir.mkdir(exist_ok=True)
 
     def capture(self) -> Path:
-        file_path = self.capture_dir / f"capture_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}.jpg"
+        file_path = self.capture_dir / f"capture_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}.jpg"
         if self.simulate:
             file_path.write_bytes(b"simulated-image")
             return file_path
