@@ -1,0 +1,70 @@
+# IoT Waste Monitoring & Characterization configuration.
+# Copy to config.yaml and edit for your installation.
+
+# ---- Hardware ----
+hardware:
+  # Set to true to use mock implementations (no Pi required).
+  # Useful for developing the dashboard on a laptop.
+  use_mock: true
+
+  scale:
+    # NAU7802 I2C address (default 0x2A)
+    i2c_address: 0x2A
+    # Calibration factor: raw_reading / grams. Determined via scripts/calibrate_scale.py
+    calibration_factor: 1000.0
+    # Tare offset in raw counts (subtracted before applying calibration_factor)
+    tare_offset: 0
+    # Gain for NAU7802 (1, 2, 4, 8, 16, 32, 64, 128). 128 is most sensitive.
+    gain: 128
+    # Samples per second the loop will try to read
+    sample_rate_hz: 10
+
+  camera:
+    # OpenCV camera index (0 = first USB camera)
+    index: 0
+    width: 640
+    height: 480
+    # JPEG quality for saved images (1-100)
+    jpeg_quality: 85
+
+# ---- Event detection (stable placement) ----
+events:
+  # Minimum weight (grams) to consider something is on the scale
+  min_weight_g: 5.0
+  # Number of consecutive samples that must be stable
+  stability_window: 8
+  # Standard deviation (grams) within window must be <= this
+  stability_g: 1.0
+  # After event recorded, weight must drop below this before next event accepted
+  reset_threshold_g: 2.0
+
+# ---- AI Detection ----
+ai:
+  # 'tflite' for TensorFlow Lite, 'mock' for development without a model
+  backend: mock
+  model_path: app/ai/models/efficientdet_lite0.tflite
+  labels_path: app/ai/models/coco_labels.txt
+  # Minimum confidence (0-1) to accept a detection
+  min_confidence: 0.4
+  # Input image size expected by model (square)
+  input_size: 320
+
+# ---- Database ----
+database:
+  url: sqlite:///data/waste.db
+
+# ---- Web server ----
+web:
+  host: 0.0.0.0
+  port: 5000
+  debug: false
+  # Secret used by Flask sessions / Socket.IO
+  secret_key: change-me-in-production
+
+# ---- Storage ----
+storage:
+  images_dir: data/images
+
+# ---- Logging ----
+logging:
+  level: INFO

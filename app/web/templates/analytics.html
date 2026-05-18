@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Analytics - Waste Monitor{% endblock %}
+
+{% block content %}
+<section class="grid">
+  <div class="card stat"><div class="label">Total items (all time)</div><div class="value" id="stat-total-count">–</div></div>
+  <div class="card stat"><div class="label">Total weight (all time)</div><div class="value" id="stat-total-weight">– g</div></div>
+  <div class="card stat"><div class="label">Items today</div><div class="value" id="stat-today-count">–</div></div>
+  <div class="card stat"><div class="label">Weight today</div><div class="value" id="stat-today-weight">– g</div></div>
+</section>
+
+<section class="grid charts">
+  <div class="card"><h2>Weight by Category</h2><canvas id="chart-weight-cat"></canvas></div>
+  <div class="card"><h2>Count by Category</h2><canvas id="chart-count-cat"></canvas></div>
+  <div class="card wide"><h2>Daily Totals (last 14 days)</h2><canvas id="chart-daily"></canvas></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script>
+  window.WASTE_CATEGORIES = {{ categories|tojson }};
+</script>
+<script src="{{ url_for('static', filename='analytics.js') }}"></script>
+{% endblock %}
