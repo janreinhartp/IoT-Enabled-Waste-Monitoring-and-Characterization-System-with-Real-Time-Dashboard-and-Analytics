@@ -166,17 +166,45 @@ def build_dashboard_html() -> str:
       document.getElementById('avg-weight').textContent = analytics.average_weight_grams;
 
       const rows = document.getElementById('rows');
-      rows.innerHTML = readings.slice().reverse().map(r =>
-        `<tr><td>${r.timestamp}</td><td>${r.waste_type}</td><td>${r.confidence}</td><td>${r.weight_grams}</td></tr>`
-      ).join('');
+      rows.replaceChildren();
+      readings.slice().reverse().forEach((r) => {
+        const tr = document.createElement('tr');
+        [r.timestamp, r.waste_type, r.confidence, r.weight_grams].forEach((value) => {
+          const td = document.createElement('td');
+          td.textContent = String(value);
+          tr.appendChild(td);
+        });
+        rows.appendChild(tr);
+      });
 
       const byType = analytics.by_type_grams || {};
       const maxVal = Math.max(1, ...Object.values(byType));
       const bars = document.getElementById('bars');
-      bars.innerHTML = Object.entries(byType).map(([k, v]) => {
+      bars.replaceChildren();
+      Object.entries(byType).forEach(([k, v]) => {
         const pct = Math.round((v / maxVal) * 100);
-        return `<div class=\"bar-row\"><div>${k}</div><div class=\"bar\"><div style=\"width:${pct}%\"></div></div><div>${v}</div></div>`;
-      }).join('');
+
+        const row = document.createElement('div');
+        row.className = 'bar-row';
+
+        const label = document.createElement('div');
+        label.textContent = String(k);
+
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+
+        const barFill = document.createElement('div');
+        barFill.style.width = `${pct}%`;
+        bar.appendChild(barFill);
+
+        const value = document.createElement('div');
+        value.textContent = String(v);
+
+        row.appendChild(label);
+        row.appendChild(bar);
+        row.appendChild(value);
+        bars.appendChild(row);
+      });
     }
 
     document.getElementById('sample-btn').addEventListener('click', async () => {
