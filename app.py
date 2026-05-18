@@ -101,7 +101,7 @@ class WasteMonitoringService:
         total_weight = sum(r.weight_grams for r in readings)
         by_type: Dict[str, float] = {w: 0.0 for w in WASTE_CLASSES}
         for reading in readings:
-            by_type[reading.waste_type] = by_type.get(reading.waste_type, 0.0) + reading.weight_grams
+            by_type[reading.waste_type] += reading.weight_grams
 
         sample_count = len(readings)
         avg_weight = round(total_weight / sample_count, 2) if sample_count else 0.0
