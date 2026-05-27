@@ -45,7 +45,7 @@ def test_pipeline_records_event_on_stable_placement(tmp_path):
     try:
         # Drive the mock scale to a stable load
         scale.set_weight(250.0)
-        # Wait up to 3 s for an event
+        # Wait up to 3 s for at least one event
         deadline = time.time() + 3.0
         while time.time() < deadline and not events:
             time.sleep(0.05)
@@ -53,16 +53,21 @@ def test_pipeline_records_event_on_stable_placement(tmp_path):
     finally:
         pipeline.stop()
 
-    rec = events[0]
-    assert 200.0 < rec.weight_grams < 300.0
-    assert rec.waste_category != ""
-    # Image was saved
-    assert rec.image_path and os.path.isfile(rec.image_path)
+    # With multi-detection, 1 or more events may be stored per placement.
+    stored = db.list_events(limit=10)
+    assert len(stored) >= 1
 
-    # And it's persisted
-    stored = db.list_events(limit=5)
-    assert len(stored) == 1
-    assert stored[0].id == rec.id
+    # Total weight across all stored events must equal the placement weight.
+    total_weight = sum(e.weight_grams for e in stored)
+    assert abs(total_weight - 250.0) < 1.0
+
+    # Every event must have a valid category.
+    valid_categories = {"plastic", "paper", "metal", "glass"}
+    for e in stored:
+        assert e.waste_category in valid_categories
+
+    # Image was saved (all events share the same captured frame path).
+    assert events[0].image_path and os.path.isfile(events[0].image_path)
 
     # Weight callback was called repeatedly
     assert len(weights) > 0

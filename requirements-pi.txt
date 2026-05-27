@@ -2,6 +2,6 @@
 #   pip install -r requirements.txt -r requirements-pi.txt
 -r requirements.txt
 
-adafruit-circuitpython-nau7802>=1.0
+adafruit-circuitpython-ads1x15>=2.2
 adafruit-blinka>=8.0
 tflite-runtime>=2.14; platform_machine == "aarch64" or platform_machine == "armv7l"

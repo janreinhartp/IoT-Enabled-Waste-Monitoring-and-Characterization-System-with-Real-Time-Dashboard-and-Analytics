@@ -37,15 +37,12 @@ class Base(DeclarativeBase):
     pass
 
 
-# Default waste categories. (display_name, slug, color)
+# Supported waste categories. (display_name, slug, color)
 DEFAULT_CATEGORIES = [
     ("Plastic", "plastic", "#3b82f6"),
     ("Paper", "paper", "#f59e0b"),
     ("Metal", "metal", "#6b7280"),
     ("Glass", "glass", "#10b981"),
-    ("Organic", "organic", "#84cc16"),
-    ("Residual", "residual", "#9ca3af"),
-    ("Unknown", "unknown", "#ef4444"),
 ]
 
 

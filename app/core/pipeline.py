@@ -6,7 +6,7 @@ import os
 import threading
 import time
 import uuid
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 import numpy as np
 
@@ -23,15 +23,21 @@ log = get_logger(__name__)
 
 EventCallback = Callable[[WasteEventRecord], None]
 WeightCallback = Callable[[float], None]
+BinStatusCallback = Callable[[bool], None]
 
 
 class Pipeline:
     """Runs the sample loop in a background thread.
 
     On each weighing event it captures a frame, runs the detector, saves
-    the image to disk, persists a row to the DB, and calls user-supplied
-    callbacks for live-weight updates and new events (used by the web
-    layer to push Socket.IO messages).
+    the image to disk, persists one DB row per detected item, and calls
+    user-supplied callbacks for live-weight updates, new events, and bin
+    status changes (used by the web layer to push Socket.IO messages).
+
+    Bin capacity: when the cumulative weight on the scale reaches
+    ``events.capacity_kg`` kg the pipeline stops accepting new placements
+    and emits a ``bin_full=True`` status. It resumes once the weight drops
+    back below ``events.reset_threshold_g`` grams (bin emptied).
     """
 
     def __init__(
@@ -44,6 +50,7 @@ class Pipeline:
         db: Database,
         on_event: Optional[EventCallback] = None,
         on_weight: Optional[WeightCallback] = None,
+        on_bin_status: Optional[BinStatusCallback] = None,
     ):
         self._cfg = cfg
         self._scale = scale
@@ -52,6 +59,7 @@ class Pipeline:
         self._db = db
         self._on_event = on_event
         self._on_weight = on_weight
+        self._on_bin_status = on_bin_status
         self._detector_state = StableEventDetector(
             min_weight_g=cfg.events.min_weight_g,
             stability_window=cfg.events.stability_window,
@@ -61,6 +69,7 @@ class Pipeline:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._latest_weight = 0.0
+        self._bin_full = False
         os.makedirs(cfg.storage.images_dir, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -87,6 +96,10 @@ class Pipeline:
     def latest_weight(self) -> float:
         return self._latest_weight
 
+    @property
+    def bin_full(self) -> bool:
+        return self._bin_full
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
@@ -95,6 +108,8 @@ class Pipeline:
         rate = max(1, int(self._cfg.hardware.scale.sample_rate_hz))
         interval = 1.0 / rate
         last_broadcast = 0.0
+        capacity_g = self._cfg.events.capacity_kg * 1000.0
+
         while not self._stop.is_set():
             t0 = time.monotonic()
             try:
@@ -113,8 +128,26 @@ class Pipeline:
                     log.exception("on_weight callback failed")
                 last_broadcast = t0
 
+            # --- Bin capacity check ---
+            was_full = self._bin_full
+            self._bin_full = grams >= capacity_g
+            if self._bin_full != was_full:
+                if self._bin_full:
+                    log.warning(
+                        "BIN FULL: %.0f g >= %.0f g capacity. "
+                        "No new events until bin is emptied.",
+                        grams, capacity_g,
+                    )
+                else:
+                    log.info("Bin emptied (%.0f g). Resuming event detection.", grams)
+                if self._on_bin_status:
+                    try:
+                        self._on_bin_status(self._bin_full)
+                    except Exception:  # noqa: BLE001
+                        log.exception("on_bin_status callback failed")
+
             event = self._detector_state.push(grams)
-            if event is not None:
+            if event is not None and not self._bin_full:
                 self._handle_event(event.weight_grams)
 
             # Sleep for the remainder of the interval
@@ -130,35 +163,39 @@ class Pipeline:
     def _handle_event(self, weight_g: float) -> None:
         log.info("Stable placement detected: %.2f g", weight_g)
         frame = self._safe_capture()
-        detection = self._safe_detect(frame)
+        detections = self._safe_detect_all(frame)
 
         image_path: Optional[str] = None
         if frame is not None:
             image_path = self._save_image(frame)
 
-        if detection is None:
-            detection = Detection(label="unknown", category="unknown", confidence=0.0)
+        if not detections:
+            log.info("No recognizable items detected in frame; event skipped.")
+            return
 
-        record = self._db.insert_event(
-            weight_grams=weight_g,
-            detected_label=detection.label,
-            category_slug=detection.category,
-            confidence=detection.confidence,
-            image_path=image_path,
-        )
-        log.info(
-            "Recorded event #%d: %s (%s) %.0f g conf=%.2f",
-            record.id,
-            record.detected_label,
-            record.waste_category,
-            record.weight_grams,
-            record.confidence,
-        )
-        if self._on_event:
-            try:
-                self._on_event(record)
-            except Exception:  # noqa: BLE001
-                log.exception("on_event callback failed")
+        # Split weight equally among all detected items.
+        weight_per_item = weight_g / len(detections)
+        for detection in detections:
+            record = self._db.insert_event(
+                weight_grams=weight_per_item,
+                detected_label=detection.label,
+                category_slug=detection.category,
+                confidence=detection.confidence,
+                image_path=image_path,
+            )
+            log.info(
+                "Recorded event #%d: %s (%s) %.0f g conf=%.2f",
+                record.id,
+                record.detected_label,
+                record.waste_category,
+                record.weight_grams,
+                record.confidence,
+            )
+            if self._on_event:
+                try:
+                    self._on_event(record)
+                except Exception:  # noqa: BLE001
+                    log.exception("on_event callback failed")
 
     def _safe_capture(self) -> Optional[np.ndarray]:
         try:
@@ -167,14 +204,14 @@ class Pipeline:
             log.exception("Camera capture failed")
             return None
 
-    def _safe_detect(self, frame: Optional[np.ndarray]) -> Optional[Detection]:
+    def _safe_detect_all(self, frame: Optional[np.ndarray]) -> List[Detection]:
         if frame is None:
-            return None
+            return []
         try:
-            return self._detector.detect(frame)
+            return self._detector.detect_all(frame)
         except Exception:  # noqa: BLE001
             log.exception("Detector failed")
-            return None
+            return []
 
     def _save_image(self, frame: np.ndarray) -> Optional[str]:
         try:

@@ -8,14 +8,15 @@ hardware:
   use_mock: true
 
   scale:
-    # NAU7802 I2C address (default 0x2A)
-    i2c_address: 0x2A
-    # Calibration factor: raw_reading / grams. Determined via scripts/calibrate_scale.py
-    calibration_factor: 1000.0
-    # Tare offset in raw counts (subtracted before applying calibration_factor)
-    tare_offset: 0
-    # Gain for NAU7802 (1, 2, 4, 8, 16, 32, 64, 128). 128 is most sensitive.
-    gain: 128
+    # ADS1115 I2C address (default 0x48 when ADDR pin tied to GND)
+    i2c_address: 0x48
+    # Calibration factor: volts per gram (V/g). Determined via scripts/calibrate_scale.py
+    calibration_factor: 1.0
+    # Tare offset in volts (subtracted before dividing by calibration_factor)
+    tare_offset: 0.0
+    # ADS1115 PGA gain setting (2/3=±6.144V, 1=±4.096V, 2=±2.048V, 4=±1.024V, 8=±0.512V, 16=±0.256V)
+    # Use 0.6667 (2/3) when powering ADS1115 at 5V to cover the full 0-5V input range.
+    gain: 0.6667
     # Samples per second the loop will try to read
     sample_rate_hz: 10
 
@@ -37,6 +38,10 @@ events:
   stability_g: 1.0
   # After event recorded, weight must drop below this before next event accepted
   reset_threshold_g: 2.0
+  # Bin capacity in kg. When the total weight on the scale reaches this value
+  # the system stops accepting new placements until the bin is emptied
+  # (weight drops back below reset_threshold_g).
+  capacity_kg: 100.0
 
 # ---- AI Detection ----
 ai:

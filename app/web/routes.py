@@ -35,6 +35,10 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
 def register(app: Flask, socketio: SocketIO, cfg: AppConfig, db: Database) -> None:
     """Register all HTTP routes and Socket.IO handlers."""
 
+    # Module-level state so broadcast_bin_status can update it and on_connect
+    # can send the current value to freshly connected clients.
+    _bin_state: dict = {"full": False}
+
     # ---- Pages ----
 
     @app.get("/")
@@ -85,6 +89,13 @@ def register(app: Flask, socketio: SocketIO, cfg: AppConfig, db: Database) -> No
     def api_categories():
         return jsonify(db.list_categories())
 
+    @app.get("/api/bin_status")
+    def api_bin_status():
+        return jsonify({
+            "bin_full": _bin_state["full"],
+            "capacity_kg": cfg.events.capacity_kg,
+        })
+
     @app.get("/api/events.csv")
     def api_events_csv():
         events = db.list_events(limit=10000)
@@ -133,7 +144,14 @@ def register(app: Flask, socketio: SocketIO, cfg: AppConfig, db: Database) -> No
     def on_connect():  # noqa: D401 - Socket.IO handler
         # Send a snapshot of recent state to a freshly connected client.
         recent = [e.to_dict() for e in db.list_events(limit=10)]
-        socketio.emit("snapshot", {"recent": recent})
+        socketio.emit("snapshot", {
+            "recent": recent,
+            "bin_full": _bin_state["full"],
+            "capacity_kg": cfg.events.capacity_kg,
+        })
+
+    # Expose _bin_state so broadcast_bin_status (below) can mutate it.
+    app.config["_bin_state"] = _bin_state
 
 
 def broadcast_event(socketio: SocketIO, event_dict: dict) -> None:
@@ -144,3 +162,11 @@ def broadcast_event(socketio: SocketIO, event_dict: dict) -> None:
 def broadcast_weight(socketio: SocketIO, grams: float) -> None:
     """Push a live weight update."""
     socketio.emit("weight", {"grams": grams})
+
+
+def broadcast_bin_status(app: Flask, socketio: SocketIO, is_full: bool) -> None:
+    """Push a bin-full / bin-emptied status change to all connected clients."""
+    bin_state = app.config.get("_bin_state")
+    if bin_state is not None:
+        bin_state["full"] = is_full
+    socketio.emit("bin_status", {"bin_full": is_full})

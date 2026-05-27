@@ -7,28 +7,50 @@ An IoT system that **weighs** an item placed on a load-cell scale, **identifies*
 | Component | Notes |
 |---|---|
 | Raspberry Pi (3/4/5) | Runs the whole stack. |
-| NAU7802 24-bit ADC | Connected over I²C (SDA/SCL). |
-| 4 × Load cell | Wired together as a single Wheatstone bridge to the NAU7802 (E+, E-, A+, A-). |
+| ADS1115 16-bit ADC | Connected over I²C (SDA/SCL). Reads the sensor voltage on **channel 1 (AIN1)**. |
+| Analogue weight sensor / load-cell amplifier | Voltage output wired to AIN1. Must output 0–5 V. |
+| BSS138 bidirectional I²C level shifter | Translates 3.3 V Pi I²C ↔ 5 V ADS1115 logic. |
 | USB camera | Plugged into any USB port. |
 
 Enable I²C on the Pi with `sudo raspi-config` → *Interface Options* → *I2C*.
 
+## Wiring
+
+The ADS1115 is powered at **5 V** so it can safely read the full 0–5 V sensor range (PGA set to ±6.144 V). A bidirectional level shifter on the I²C lines protects the Pi's 3.3 V GPIO.
+
+```
+Raspberry Pi              Level Shifter (BSS138)       ADS1115
+────────────────          ──────────────────────       ───────────────────
+3.3V  (Pin 1)  ─────────► LV (3.3V ref)
+5V    (Pin 2)  ─────────► HV (5V ref)  ────────────► VDD
+GND   (Pin 6)  ─────────► GND ──────────────────────► GND
+                                                       ADDR ──► GND  (addr 0x48)
+
+SDA   (Pin 3)  ─────────► LV1 ◄──────► HV1 ─────────► SDA
+SCL   (Pin 5)  ─────────► LV2 ◄──────► HV2 ─────────► SCL
+
+                                         Sensor output ──► AIN1  (channel 1)
+                                         Sensor GND    ──► GND
+```
+
+> **Note:** Do **not** connect the ADS1115 VDD directly to the Pi's 3.3 V pin when reading 5 V signals — the analog input must not exceed VDD + 0.3 V.
+
 ## Architecture
 
 ```
-┌──────────┐   ┌──────────┐   ┌────────────┐
-│ NAU7802  │──▶│          │   │  USB Cam   │
-│ + 4 LCs  │   │ Raspberry│◀──│            │
-└──────────┘   │   Pi     │   └────────────┘
-               │          │
-               │ Python   │──▶ SQLite ──▶ Flask + SocketIO ──▶ Browser dashboard
-               │ services │
-               └──────────┘
+┌───────────────┐   ┌──────────────┐   ┌────────────┐
+│   ADS1115     │──▶│              │   │  USB Cam   │
+│  (AIN1, 5V)  │   │  Raspberry   │◀──│            │
+└───────────────┘   │     Pi       │   └────────────┘
+                    │              │
+                    │   Python     │──▶ SQLite ──▶ Flask + SocketIO ──▶ Browser dashboard
+                    │   services   │
+                    └──────────────┘
 ```
 
 A single Python process runs:
-1. A background thread sampling the scale at ~10 Hz.
-2. A stable-event detector that fires only when weight is above a threshold **and** stable for a configurable window (so it ignores oscillation and adjustments).
+1. A background thread sampling the ADS1115 channel 1 voltage at ~10 Hz.
+2. A stable-event detector that fires only when the derived weight is above a threshold **and** stable for a configurable window (ignores oscillation and adjustments).
 3. On each event: capture a USB-camera frame → run a TFLite object detector → map the label to a waste category → save the image → insert a row in SQLite → push a Socket.IO message.
 4. A Flask + Flask-SocketIO web server with a live dashboard and analytics page.
 
@@ -39,7 +61,7 @@ A single Python process runs:
 ├── run.py                       # entrypoint
 ├── config.example.yaml          # copy to config.yaml and edit
 ├── requirements.txt             # base deps (work on any OS)
-├── requirements-pi.txt          # Pi-only deps (NAU7802, tflite_runtime)
+├── requirements-pi.txt          # Pi-only deps (ADS1115, tflite_runtime)
 ├── app/
 │   ├── config.py                # YAML config loader
 │   ├── hardware/                # Scale + Camera (real + mock)
@@ -48,15 +70,29 @@ A single Python process runs:
 │   ├── web/                     # Flask app, routes, templates, static
 │   └── utils/                   # logging
 ├── scripts/
-│   ├── calibrate_scale.py       # interactive tare + calibration
+│   ├── calibrate_scale.py       # interactive tare + calibration (voltage-based)
 │   └── download_model.py        # fetches EfficientDet-Lite0 TFLite model
 ├── tests/                       # pytest suite (uses mock hardware)
 └── data/                        # SQLite db + captured images (gitignored)
 ```
 
-## Quick Start (laptop, mock hardware)
+---
 
-You don't need a Pi to develop the dashboard — the system ships with a mock scale + mock camera + mock detector.
+## Quick Start (laptop / mock hardware)
+
+You don't need a Pi to develop the dashboard — the system ships with a mock scale, mock camera, and mock detector.
+
+### Windows
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item config.example.yaml config.yaml   # already has use_mock: true
+python run.py
+```
+
+### macOS / Linux
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -65,42 +101,83 @@ cp config.example.yaml config.yaml          # already has use_mock: true
 python run.py
 ```
 
-Open <http://localhost:5000>. The mock scale will simulate items being placed and removed every few seconds; the dashboard will update live.
+Open <http://localhost:5000>. The mock scale simulates items being placed and removed every few seconds; the dashboard updates live.
+
+---
 
 ## Running on the Raspberry Pi
 
+### 1 — System packages
+
 ```bash
-# System packages for OpenCV + I2C
 sudo apt update
 sudo apt install -y python3-pip python3-venv python3-opencv i2c-tools libatlas-base-dev
-
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-pi.txt
-
-# Download a small TFLite object detector (EfficientDet-Lite0 + COCO labels)
-python -m scripts.download_model
-
-cp config.example.yaml config.yaml
-# Edit config.yaml: set hardware.use_mock: false and ai.backend: tflite
 ```
 
-### Calibrate the scale
+### 2 — Verify the ADS1115 is detected on I²C
+
+```bash
+i2cdetect -y 1
+# You should see 0x48 in the output
+```
+
+### 3 — Python environment
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r requirements-pi.txt
+```
+
+### 4 — Download the TFLite model
+
+```bash
+python -m scripts.download_model
+```
+
+### 5 — Configure
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Open `config.yaml` and set:
+
+```yaml
+hardware:
+  use_mock: false          # use real ADS1115 + USB camera
+  scale:
+    i2c_address: 0x48      # ADS1115 default (ADDR pin → GND)
+    gain: 0.6667           # 2/3 = ±6.144V PGA, covers full 0–5V range
+    tare_offset: 0.0       # filled in by calibrate_scale.py
+    calibration_factor: 1.0  # filled in by calibrate_scale.py
+
+ai:
+  backend: tflite
+```
+
+### 6 — Calibrate the scale
 
 ```bash
 python -m scripts.calibrate_scale --known-weight 500
 ```
 
-Follow the prompts (clear the platform, then place a known weight). Copy the printed `tare_offset` and `calibration_factor` into `config.yaml` under `hardware.scale`.
+Follow the prompts:
+1. Clear the platform → press Enter (captures tare voltage).
+2. Place the known weight → press Enter (computes V/g calibration factor).
 
-### Start the system
+Copy the printed `tare_offset` and `calibration_factor` values into `config.yaml` under `hardware.scale`.
+
+### 7 — Start the system
 
 ```bash
 python run.py
 ```
 
-The web UI is at `http://<pi-ip>:5000`.
+Open `http://<pi-ip>:5000` in a browser on the same network.
 
-### Auto-start on boot (systemd)
+---
+
+## Auto-start on boot (systemd)
 
 Create `/etc/systemd/system/waste-monitor.service`:
 
@@ -120,23 +197,44 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-Then:
+Enable and start:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now waste-monitor
+sudo systemctl status waste-monitor   # confirm it is running
 ```
 
-## Configuration reference
+View live logs:
 
-All settings live in `config.yaml` (see `config.example.yaml` for the full annotated template). Key sections:
+```bash
+journalctl -u waste-monitor -f
+```
 
-* `hardware.use_mock` — `true` for development, `false` to use the real NAU7802 + USB camera.
-* `hardware.scale.calibration_factor` / `tare_offset` — produced by `calibrate_scale.py`.
-* `events` — threshold, stability window, and reset hysteresis for the placement-detector state machine.
-* `ai.backend` — `mock` or `tflite`. With `tflite`, set `model_path` and `labels_path`.
-* `database.url` — SQLAlchemy URL, defaults to local SQLite.
-* `web.host`/`port` — where the Flask server binds.
+---
+
+## Configuration Reference
+
+All settings live in `config.yaml` (see `config.example.yaml` for the full annotated template).
+
+| Key | Default | Description |
+|---|---|---|
+| `hardware.use_mock` | `true` | `false` to use real ADS1115 + USB camera |
+| `hardware.scale.i2c_address` | `0x48` | ADS1115 I²C address (ADDR pin → GND) |
+| `hardware.scale.gain` | `0.6667` | ADS1115 PGA: `0.6667`=±6.144 V, `1`=±4.096 V, `2`=±2.048 V |
+| `hardware.scale.tare_offset` | `0.0` | Sensor voltage (V) at zero weight — set by `calibrate_scale.py` |
+| `hardware.scale.calibration_factor` | `1.0` | Volts per gram (V/g) — set by `calibrate_scale.py` |
+| `hardware.scale.sample_rate_hz` | `10` | Target polling rate |
+| `events.min_weight_g` | `5.0` | Minimum weight (g) to start a placement event |
+| `events.stability_window` | `8` | Samples that must be within `stability_g` stddev |
+| `events.stability_g` | `1.0` | Max stddev (g) to declare a stable reading |
+| `events.reset_threshold_g` | `2.0` | Weight must drop below this to reset after an event |
+| `ai.backend` | `mock` | `mock` or `tflite` |
+| `ai.model_path` | — | Path to `.tflite` model file |
+| `database.url` | SQLite | SQLAlchemy URL |
+| `web.host` / `web.port` | `0.0.0.0:5000` | Flask bind address |
+
+---
 
 ## Web API
 
@@ -150,8 +248,10 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full annot
 | `GET /api/categories` | Category list |
 | `GET /api/events.csv` | Export all events as CSV |
 | `GET /images/<event_id>` | Captured image for an event |
-| Socket.IO `weight` | Live weight stream |
+| Socket.IO `weight` | Live weight stream (~10 Hz) |
 | Socket.IO `new_event` | Pushed when a new placement is recorded |
+
+---
 
 ## Tests
 
@@ -160,10 +260,13 @@ pip install -r requirements.txt
 pytest -v
 ```
 
-The test suite uses the mock scale, mock camera, and mock detector, so it runs anywhere — no hardware required.
+The test suite uses the mock scale, mock camera, and mock detector — no hardware required.
+
+---
 
 ## Extending
 
 * **Custom waste classifier:** swap the TFLite model and label-to-category map in `app/ai/labels.py` for a waste-specific classifier (e.g., TrashNet).
 * **Different categories:** edit `DEFAULT_CATEGORIES` in `app/core/db.py` (the dashboard reads them dynamically).
 * **Different DB:** point `database.url` at Postgres/MySQL — the SQLAlchemy layer handles it.
+* **Different ADC channel:** change `ADS.P1` in `app/hardware/scale.py` to `ADS.P0`, `ADS.P2`, or `ADS.P3` to read from a different ADS1115 channel.

@@ -16,10 +16,10 @@ import yaml
 
 @dataclass
 class ScaleConfig:
-    i2c_address: int = 0x2A
-    calibration_factor: float = 1000.0
-    tare_offset: int = 0
-    gain: int = 128
+    i2c_address: int = 0x48
+    calibration_factor: float = 1.0
+    tare_offset: float = 0.0
+    gain: float = 2 / 3  # 2/3 = ±6.144V PGA; covers full 0–5V range
     sample_rate_hz: int = 10
 
 
@@ -44,6 +44,7 @@ class EventsConfig:
     stability_window: int = 8
     stability_g: float = 1.0
     reset_threshold_g: float = 2.0
+    capacity_kg: float = 100.0
 
 
 @dataclass

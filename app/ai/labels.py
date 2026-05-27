@@ -1,55 +1,43 @@
 """Mapping from object-detection labels (e.g. COCO) to waste categories.
 
-The category slugs here must match the seeded categories in
-:mod:`app.core.db` (``plastic``, ``paper``, ``metal``, ``glass``,
-``organic``, ``residual``, ``unknown``).
+Supported categories: ``plastic``, ``paper``, ``metal``, ``glass``.
+Labels that do not map to one of these four return ``None`` and are
+ignored by the pipeline.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Detection-label (lowercase) -> waste category slug
 LABEL_TO_CATEGORY: Dict[str, str] = {
     # Plastic
     "bottle": "plastic",
     "cup": "plastic",
-    "wine glass": "glass",
-    "fork": "metal",
-    "knife": "metal",
-    "spoon": "metal",
     # Paper / cardboard
     "book": "paper",
     "newspaper": "paper",
     # Metal
     "can": "metal",
+    "fork": "metal",
+    "knife": "metal",
+    "spoon": "metal",
     # Glass
+    "wine glass": "glass",
     "vase": "glass",
-    # Organic / food
-    "banana": "organic",
-    "apple": "organic",
-    "sandwich": "organic",
-    "orange": "organic",
-    "broccoli": "organic",
-    "carrot": "organic",
-    "hot dog": "organic",
-    "pizza": "organic",
-    "donut": "organic",
-    "cake": "organic",
-    # Residual / general
-    "cell phone": "residual",
-    "remote": "residual",
+    "jar": "glass",
 }
 
 
-def category_for(label: str) -> str:
+def category_for(label: str) -> Optional[str]:
     """Return the waste category slug for a detection label.
 
-    Falls back to ``"unknown"`` if no mapping exists.
+    Returns ``None`` if the label does not map to a known category;
+    the caller should discard such detections.
     """
     if not label:
-        return "unknown"
-    return LABEL_TO_CATEGORY.get(label.strip().lower(), "unknown")
+        return None
+    return LABEL_TO_CATEGORY.get(label.strip().lower())
 
 
 def load_labels(path: str) -> List[str]:

@@ -66,7 +66,19 @@ def test_api_categories(tmp_path):
     r = client.get("/api/categories")
     assert r.status_code == 200
     slugs = {c["slug"] for c in r.get_json()}
-    assert "plastic" in slugs
+    assert {"plastic", "paper", "metal", "glass"} <= slugs
+    assert "organic" not in slugs
+    assert "unknown" not in slugs
+
+
+def test_api_bin_status(tmp_path):
+    app, _ = _make_app(tmp_path)
+    client = app.test_client()
+    r = client.get("/api/bin_status")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["bin_full"] is False
+    assert data["capacity_kg"] == 100.0
 
 
 def test_api_events_csv(tmp_path):

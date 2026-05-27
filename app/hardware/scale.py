@@ -1,8 +1,8 @@
-"""Scale interface (NAU7802 + 4 load cells via Wheatstone bridge).
+"""Scale interface (ADS1115 voltage reading on channel 1).
 
 Provides:
   * :class:`Scale` - abstract interface
-  * :class:`NAU7802Scale` - real driver (Adafruit CircuitPython lib)
+  * :class:`ADS1115Scale` - real driver (Adafruit CircuitPython ADS1x15 lib)
   * :func:`build_scale` - factory selecting real or mock based on config
   * :class:`StableEventDetector` - turns a stream of weight samples into
     discrete "something was placed on the scale" events
@@ -11,7 +11,6 @@ Provides:
 from __future__ import annotations
 
 import statistics
-import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Deque, Optional, Protocol
@@ -36,57 +35,57 @@ class Scale(Protocol):
 
 
 # ----------------------------------------------------------------------------
-# Real NAU7802 driver
+# Real ADS1115 driver (Channel 1 / AIN1)
 # ----------------------------------------------------------------------------
 
 
-class NAU7802Scale:
-    """Driver for the NAU7802 24-bit ADC with a 4-load-cell Wheatstone bridge.
+class ADS1115Scale:
+    """Driver for the ADS1115 16-bit ADC reading voltage on channel 1 (AIN1).
 
-    Uses ``adafruit_nau7802`` which talks over I2C. Each load cell is wired
-    so that the four together form a single Wheatstone bridge feeding
-    Channel 1 of the NAU7802.
+    Uses ``adafruit_ads1x15`` which talks over I2C.  The analogue sensor
+    output (e.g. a load-cell amplifier board) is wired to AIN1 of the
+    ADS1115.  Voltage is converted to grams using a linear calibration:
+
+        grams = (voltage_V - tare_offset_V) / calibration_factor_V_per_g
     """
 
     def __init__(
         self,
         *,
-        i2c_address: int = 0x2A,
-        gain: int = 128,
+        i2c_address: int = 0x48,
+        gain: float = 2 / 3,
         calibration_factor: float = 1.0,
-        tare_offset: int = 0,
+        tare_offset: float = 0.0,
     ):
         # Lazy imports so non-Pi machines can import this module.
         import board  # type: ignore[import-not-found]
         import busio  # type: ignore[import-not-found]
-        import adafruit_nau7802  # type: ignore[import-not-found]
+        import adafruit_ads1x15.ads1115 as ADS  # type: ignore[import-not-found]
+        from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore[import-not-found]
 
         self._i2c = busio.I2C(board.SCL, board.SDA)
-        self._nau = adafruit_nau7802.NAU7802(self._i2c, address=i2c_address)
-        self._nau.gain = gain
-        self._nau.enable(True)
+        self._ads = ADS.ADS1115(self._i2c, address=i2c_address)
+        self._ads.gain = gain
+        self._chan = AnalogIn(self._ads, ADS.P1)  # Channel 1 (AIN1)
         self._calibration_factor = calibration_factor
         self._tare_offset = tare_offset
 
-    def _read_raw(self) -> int:
-        # Block until a sample is ready (the lib raises if not ready)
-        while not self._nau.available():
-            time.sleep(0.005)
-        return int(self._nau.read())
+    def _read_voltage(self) -> float:
+        return self._chan.voltage
 
     def read_raw_average(self, samples: int = 8) -> float:
-        return sum(self._read_raw() for _ in range(samples)) / samples
+        return sum(self._read_voltage() for _ in range(samples)) / samples
 
     def read_grams(self) -> float:
-        raw = self._read_raw()
-        return (raw - self._tare_offset) / self._calibration_factor
+        voltage = self._read_voltage()
+        return (voltage - self._tare_offset) / self._calibration_factor
 
     def tare(self, samples: int = 16) -> None:
-        self._tare_offset = int(self.read_raw_average(samples))
-        log.info("Tare offset set to %d", self._tare_offset)
+        self._tare_offset = self.read_raw_average(samples)
+        log.info("Tare offset set to %.6f V", self._tare_offset)
 
     @property
-    def tare_offset(self) -> int:
+    def tare_offset(self) -> float:
         return self._tare_offset
 
     @property
@@ -98,7 +97,7 @@ class NAU7802Scale:
 
     def close(self) -> None:  # pragma: no cover - hardware path
         try:
-            self._nau.enable(False)
+            self._i2c.deinit()
         except Exception:  # noqa: BLE001
             pass
 
@@ -116,8 +115,8 @@ def build_scale(cfg: AppConfig) -> Scale:
         log.info("Using MockScale (set hardware.use_mock=false to use real hardware)")
         return MockScale()
     sc = cfg.hardware.scale
-    log.info("Initializing NAU7802 at 0x%02X", sc.i2c_address)
-    return NAU7802Scale(
+    log.info("Initializing ADS1115 at 0x%02X, channel 1", sc.i2c_address)
+    return ADS1115Scale(
         i2c_address=sc.i2c_address,
         gain=sc.gain,
         calibration_factor=sc.calibration_factor,

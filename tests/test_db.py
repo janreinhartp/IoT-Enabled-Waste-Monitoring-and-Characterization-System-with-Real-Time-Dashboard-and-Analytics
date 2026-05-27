@@ -12,7 +12,10 @@ def make_db(tmp_path):
 def test_seed_categories(tmp_path):
     db = make_db(tmp_path)
     slugs = {c["slug"] for c in db.list_categories()}
-    assert {"plastic", "paper", "metal", "glass", "organic", "unknown"} <= slugs
+    assert {"plastic", "paper", "metal", "glass"} <= slugs
+    # Removed categories must not be seeded
+    assert "organic" not in slugs
+    assert "unknown" not in slugs
 
 
 def test_insert_and_list_events(tmp_path):
@@ -63,7 +66,7 @@ def test_summary_and_filtering(tmp_path):
 def test_daily_totals(tmp_path):
     db = make_db(tmp_path)
     db.insert_event(
-        weight_grams=10, detected_label="x", category_slug="unknown",
+        weight_grams=10, detected_label="x", category_slug="plastic",
         confidence=0.5, image_path=None, timestamp=datetime.utcnow(),
     )
     days = db.daily_totals(days=7)
