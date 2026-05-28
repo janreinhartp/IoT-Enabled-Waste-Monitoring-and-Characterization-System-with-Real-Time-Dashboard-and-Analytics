@@ -64,6 +64,13 @@ def register(
         categories = db.list_categories()
         return render_template("analytics.html", categories=categories)
 
+    @app.get("/settings")
+    def settings():
+        from app.core.db import WasteEvent  # local import
+        with db.session() as s:
+            event_count = s.query(WasteEvent).count()
+        return render_template("settings.html", event_count=event_count)
+
     # ---- JSON API ----
 
     @app.get("/api/events")
@@ -105,6 +112,11 @@ def register(
             "bin_full": _bin_state["full"],
             "capacity_kg": cfg.events.capacity_kg,
         })
+
+    @app.post("/api/reset_db")
+    def api_reset_db():
+        deleted = db.reset_events()
+        return jsonify({"deleted": deleted, "status": "ok"})
 
     @app.get("/api/events.csv")
     def api_events_csv():

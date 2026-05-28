@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Settings - Waste Monitor{% endblock %}
+
+{% block content %}
+<h2 class="settings-heading">Settings</h2>
+
+<div class="card settings-section">
+  <h3>Database</h3>
+  <p class="settings-desc">
+    Current events stored: <strong id="event-count">{{ event_count }}</strong>
+  </p>
+  <p class="settings-desc warn">
+    ⚠️ This will permanently delete all recorded events and their saved images.
+    Use this during testing to start fresh.
+  </p>
+  <button id="reset-btn" class="btn btn-danger">Reset Database</button>
+  <span id="reset-status" class="reset-status"></span>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById('reset-btn').addEventListener('click', function () {
+    if (!confirm('Delete ALL events and images? This cannot be undone.')) return;
+
+    const btn = this;
+    const status = document.getElementById('reset-status');
+    btn.disabled = true;
+    btn.textContent = 'Resetting…';
+    status.textContent = '';
+
+    fetch('/api/reset_db', { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('event-count').textContent = '0';
+        status.textContent = '✓ Deleted ' + data.deleted + ' event(s).';
+        status.className = 'reset-status success';
+        btn.textContent = 'Reset Database';
+        btn.disabled = false;
+      })
+      .catch(() => {
+        status.textContent = '✗ Reset failed. Check server logs.';
+        status.className = 'reset-status error';
+        btn.textContent = 'Reset Database';
+        btn.disabled = false;
+      });
+  });
+</script>
+{% endblock %}

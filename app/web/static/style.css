@@ -28,3 +28,14 @@ canvas { max-width: 100%; }
 .live-feed-card { padding: 1.25rem; }
 .live-feed-wrap { background: #000; border-radius: 0.5rem; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 240px; }
 .live-feed-wrap img { width: 100%; max-height: 480px; object-fit: contain; display: block; }
+.settings-heading { margin-top: 0; }
+.settings-section h3 { margin-top: 0; font-size: 1rem; color: #374151; }
+.settings-desc { margin: 0.4rem 0; font-size: 0.95rem; }
+.settings-desc.warn { color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 0.4rem; padding: 0.6rem 0.8rem; }
+.btn { display: inline-block; padding: 0.5rem 1.25rem; border: none; border-radius: 0.5rem; font-size: 0.95rem; cursor: pointer; font-weight: 600; margin-top: 0.75rem; }
+.btn-danger { background: #dc2626; color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #b91c1c; }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.reset-status { margin-left: 1rem; font-size: 0.9rem; }
+.reset-status.success { color: #047857; }
+.reset-status.error { color: #dc2626; }

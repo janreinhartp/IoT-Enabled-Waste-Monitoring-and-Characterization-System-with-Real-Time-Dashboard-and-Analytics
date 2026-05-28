@@ -103,6 +103,26 @@ class Database:
         Base.metadata.create_all(self.engine)
         self._seed_categories()
 
+    def reset_events(self) -> int:
+        """Delete all waste events and their images from disk.
+
+        Returns the number of rows deleted.
+        """
+        import shutil  # noqa: WPS433
+
+        with self.session() as s:
+            events = s.scalars(select(WasteEvent)).all()
+            count = len(events)
+            for ev in events:
+                if ev.image_path and os.path.isfile(ev.image_path):
+                    try:
+                        os.remove(ev.image_path)
+                    except OSError:
+                        pass
+            s.query(WasteEvent).delete()
+            s.commit()
+        return count
+
     def _seed_categories(self) -> None:
         with self.session() as s:
             existing = {c.slug for c in s.scalars(select(Category)).all()}
