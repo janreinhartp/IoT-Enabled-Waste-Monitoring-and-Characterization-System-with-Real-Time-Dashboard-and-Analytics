@@ -20,6 +20,14 @@ from app.utils import get_logger
 
 log = get_logger(__name__)
 
+# Valid PGA gain values accepted by the adafruit_ads1x15 library.
+_VALID_GAINS = [2 / 3, 1, 2, 4, 8, 16]
+
+
+def _nearest_gain(value: float) -> float:
+    """Return the ADS1115 gain value closest to *value*."""
+    return min(_VALID_GAINS, key=lambda g: abs(g - value))
+
 
 class Scale(Protocol):
     """Abstract scale interface."""
@@ -65,7 +73,7 @@ class ADS1115Scale:
 
         self._i2c = busio.I2C(board.SCL, board.SDA)
         self._ads = ADS.ADS1115(self._i2c, address=i2c_address)
-        self._ads.gain = gain
+        self._ads.gain = _nearest_gain(gain)
         self._chan = AnalogIn(self._ads, ADS.P1)  # Channel 1 (AIN1)
         self._calibration_factor = calibration_factor
         self._tare_offset = tare_offset
