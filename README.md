@@ -7,8 +7,8 @@ An IoT system that **weighs** an item placed on a load-cell scale, **identifies*
 | Component | Notes |
 |---|---|
 | Raspberry Pi (3/4/5) | Runs the whole stack. |
-| ADS1115 16-bit ADC | Connected over I²C (SDA/SCL). Reads the sensor voltage on **channel 1 (AIN1)**. |
-| Analogue weight sensor / load-cell amplifier | Voltage output wired to AIN1. Must output 0–5 V. |
+| ADS1115 16-bit ADC | Connected over I²C (SDA/SCL). Reads the sensor voltage on **channel 0 (AIN0)**. |
+| Analogue weight sensor / load-cell amplifier | Voltage output wired to AIN0. Must output 0–5 V. |
 | BSS138 bidirectional I²C level shifter | Translates 3.3 V Pi I²C ↔ 5 V ADS1115 logic. |
 | USB camera | Plugged into any USB port. |
 
@@ -29,7 +29,7 @@ GND   (Pin 6)  ─────────► GND ──────────
 SDA   (Pin 3)  ─────────► LV1 ◄──────► HV1 ─────────► SDA
 SCL   (Pin 5)  ─────────► LV2 ◄──────► HV2 ─────────► SCL
 
-                                         Sensor output ──► AIN1  (channel 1)
+                                         Sensor output ──► AIN0  (channel 0)
                                          Sensor GND    ──► GND
 ```
 
@@ -98,17 +98,23 @@ Pipeline._handle_event(weight_g)
 ├── run.py                       # entrypoint
 ├── config.example.yaml          # copy to config.yaml and edit
 ├── requirements.txt             # base deps (work on any OS)
-├── requirements-pi.txt          # Pi-only deps (ADS1115, tflite_runtime)
+├── requirements-pi.txt          # Pi-only deps (ADS1115, ai-edge-litert)
 ├── app/
 │   ├── config.py                # YAML config loader
 │   ├── hardware/                # Scale + Camera (real + mock)
 │   ├── ai/                      # Detector interface, TFLite impl, label maps
 │   ├── core/                    # Pipeline, DB models, dataclasses
 │   ├── web/                     # Flask app, routes, templates, static
+│   │   └── templates/
+│   │       ├── dashboard.html   # live weight + scale status + camera feed
+│   │       ├── analytics.html   # charts
+│   │       ├── settings.html    # database reset page
+│   │       └── base.html
 │   └── utils/                   # logging
 ├── scripts/
 │   ├── calibrate_scale.py       # interactive tare + calibration (voltage-based)
-│   └── download_model.py        # fetches EfficientDet-Lite0 TFLite model
+│   ├── download_model.py        # fetches EfficientDet-Lite0 TFLite model
+│   └── install_service.sh       # installs + enables the systemd service
 ├── tests/                       # pytest suite (uses mock hardware)
 └── data/                        # SQLite db + captured images (gitignored)
 ```
@@ -201,9 +207,13 @@ i2cdetect -y 1
 ### 3 — Python environment
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt -r requirements-pi.txt
 ```
+
+> **Note:** Raspberry Pi OS Bookworm/Trixie enforces an externally-managed Python environment.
+> Always use a venv — never install packages system-wide with `pip` on the Pi.
 
 ### 4 — Download the TFLite model
 
@@ -312,10 +322,71 @@ This prints something like `192.168.1.105`. Use that number.
 | Where you are | Address to type in your browser |
 |---|---|
 | On the Pi itself | `http://localhost:5000` |
-| On another device (phone, laptop) on the same Wi-Fi | `http://192.168.1.105:5000` *(use your actual IP)* |
+| On another device (phone, laptop) on the same Wi-Fi | `http://192.168.1.105:5000` *(use your actual IP from `hostname -I`)* |
+| Using hostname (after mDNS setup) | `http://wastemonitor.local:5000` |
 
-> **Tip:** To keep the server running after you close the terminal, see  
+> **Tip:** To keep the server running after you close the terminal, see
 > [Auto-start on boot](#auto-start-on-boot-systemd) or run it with `nohup python run.py &`.
+
+---
+
+## Accessing by Hostname (mDNS / .local)
+
+Instead of typing an IP address, you can give the Pi a memorable hostname reachable as `http://wastemonitor.local:5000` from any device on the same network — no internet required, works over both Wi-Fi and Ethernet.
+
+### 1 — Install Avahi and set the hostname
+
+```bash
+sudo apt install -y avahi-daemon
+sudo hostnamectl set-hostname wastemonitor
+```
+
+### 2 — Fix /etc/hosts (prevents sudo warnings)
+
+```bash
+sudo sed -i "s/127.0.1.1.*/127.0.1.1\twastemonitor/" /etc/hosts
+```
+
+### 3 — Enable Avahi and reboot
+
+```bash
+sudo systemctl enable --now avahi-daemon
+sudo reboot
+```
+
+After reboot, from any device on the same network:
+
+```
+http://wastemonitor.local:5000
+```
+
+> **Windows:** mDNS (`.local`) is supported natively on Windows 10/11, macOS, iOS, and Android.
+> If it does not resolve on an older Windows machine, install [Bonjour Print Services](https://support.apple.com/kb/DL999) (free).
+
+### Optional — remove the port number
+
+To access as just `http://wastemonitor.local`, bind Flask to port 80 using `authbind`:
+
+```bash
+sudo apt install -y authbind
+sudo touch /etc/authbind/byport/80
+sudo chown pi /etc/authbind/byport/80
+sudo chmod 755 /etc/authbind/byport/80
+```
+
+Edit `config.yaml`:
+
+```yaml
+web:
+  host: 0.0.0.0
+  port: 80
+```
+
+Then reinstall the service (the install script handles `authbind` automatically when port 80 is configured):
+
+```bash
+sudo bash scripts/install_service.sh
+```
 
 ---
 
@@ -403,19 +474,19 @@ web:
   port: 80
 ```
 
-Start the app through `authbind`:
+Run via authbind directly:
 
 ```bash
-authbind --deep python run.py
+authbind --deep venv/bin/python run.py
 ```
 
-Or update the systemd `ExecStart` line (see [Auto-start on boot](#auto-start-on-boot-systemd)):
+Or reinstall the systemd service — `install_service.sh` detects port 80 automatically:
 
-```ini
-ExecStart=authbind --deep /home/pi/IoT-Waste-Monitor/.venv/bin/python run.py
+```bash
+sudo bash scripts/install_service.sh
 ```
 
-Now the dashboard is reachable at just:
+Now the dashboard is reachable at:
 
 ```
 http://192.168.1.100
@@ -425,36 +496,28 @@ http://192.168.1.100
 
 ## Auto-start on boot (systemd)
 
-Create `/etc/systemd/system/waste-monitor.service`:
-
-```ini
-[Unit]
-Description=IoT Waste Monitor
-After=network.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/IoT-Waste-Monitor
-ExecStart=/home/pi/IoT-Waste-Monitor/.venv/bin/python run.py
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
+A setup script is provided that auto-detects the project path, venv, and current user:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now waste-monitor
-sudo systemctl status waste-monitor   # confirm it is running
+sudo bash scripts/install_service.sh
 ```
 
-View live logs:
+This creates and enables `/etc/systemd/system/waste-monitor.service` automatically.
+
+Useful commands after installation:
 
 ```bash
-journalctl -u waste-monitor -f
+sudo systemctl status waste-monitor      # check if running
+sudo systemctl restart waste-monitor     # restart after config changes
+sudo systemctl stop waste-monitor        # stop
+sudo systemctl disable waste-monitor     # remove from autostart
+journalctl -u waste-monitor -f           # live logs
+```
+
+To run as a different user (e.g. not `pi`):
+
+```bash
+WASTE_USER=myuser sudo bash scripts/install_service.sh
 ```
 
 ---
@@ -467,17 +530,19 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full annot
 |---|---|---|
 | `hardware.use_mock` | `true` | `false` to use real ADS1115 + USB camera |
 | `hardware.scale.i2c_address` | `0x48` | ADS1115 I²C address (ADDR pin → GND) |
-| `hardware.scale.gain` | `0.6667` | ADS1115 PGA: `0.6667`=±6.144 V, `1`=±4.096 V, `2`=±2.048 V |
+| `hardware.scale.gain` | `0.6667` | ADS1115 PGA: `0.6667`=±6.144 V, `1`=±4.096 V, `2`=±2.048 V. Value is snapped to nearest valid gain automatically. |
 | `hardware.scale.tare_offset` | `0.0` | Sensor voltage (V) at zero weight — set by `calibrate_scale.py` |
 | `hardware.scale.calibration_factor` | `1.0` | Volts per gram (V/g) — set by `calibrate_scale.py` |
 | `hardware.scale.sample_rate_hz` | `10` | Target polling rate |
 | `events.min_weight_g` | `5.0` | Minimum weight (g) to start a placement event |
-| `events.stability_window` | `8` | Samples that must be within `stability_g` stddev |
+| `events.stability_window` | `8` | Consecutive samples that must be within `stability_g` stddev |
 | `events.stability_g` | `1.0` | Max stddev (g) to declare a stable reading |
 | `events.reset_threshold_g` | `2.0` | Weight must drop below this to reset after an event |
+| `events.capacity_kg` | `100.0` | Bin capacity — pipeline pauses when exceeded |
 | `ai.backend` | `mock` | `mock` or `tflite` |
 | `ai.model_path` | — | Path to `.tflite` model file |
-| `database.url` | SQLite | SQLAlchemy URL |
+| `ai.min_confidence` | `0.4` | Minimum detection confidence (0–1) |
+| `database.url` | SQLite | SQLAlchemy URL (supports Postgres/MySQL too) |
 | `web.host` / `web.port` | `0.0.0.0:5000` | Flask bind address |
 
 ---
@@ -486,16 +551,22 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full annot
 
 | Route | Description |
 |---|---|
-| `GET /` | Live dashboard with current weight + latest item |
+| `GET /` | Live dashboard — weight, scale status bar, camera feed, latest item |
 | `GET /analytics` | Charts (per-category weight/counts, daily totals) |
+| `GET /settings` | Settings page — reset database |
 | `GET /api/events?limit=&offset=&category=&since=&until=` | List events (JSON) |
 | `GET /api/summary?window=all\|today\|week` | Aggregate stats |
 | `GET /api/daily?days=N` | Daily totals for the last N days |
 | `GET /api/categories` | Category list |
+| `GET /api/bin_status` | Current bin-full state and capacity |
+| `POST /api/reset_db` | Delete all events and images, returns `{"deleted": N}` |
 | `GET /api/events.csv` | Export all events as CSV |
 | `GET /images/<event_id>` | Captured image for an event |
+| `GET /video_feed` | MJPEG live camera stream |
 | Socket.IO `weight` | Live weight stream (~10 Hz) |
+| Socket.IO `scale_status` | Scale detector state (idle/stabilizing/cooldown + progress) |
 | Socket.IO `new_event` | Pushed when a new placement is recorded |
+| Socket.IO `bin_status` | Pushed when bin-full state changes |
 
 ---
 
@@ -515,4 +586,6 @@ The test suite uses the mock scale, mock camera, and mock detector — no hardwa
 * **Custom waste classifier:** swap the TFLite model and label-to-category map in `app/ai/labels.py` for a waste-specific classifier (e.g., TrashNet).
 * **Different categories:** edit `DEFAULT_CATEGORIES` in `app/core/db.py` (the dashboard reads them dynamically).
 * **Different DB:** point `database.url` at Postgres/MySQL — the SQLAlchemy layer handles it.
-* **Different ADC channel:** change `ADS.P1` in `app/hardware/scale.py` to `ADS.P0`, `ADS.P2`, or `ADS.P3` to read from a different ADS1115 channel.
+* **Different ADC channel:** change `Pin.A0` in `app/hardware/scale.py` to `Pin.A1`, `Pin.A2`, or `Pin.A3` to read from a different ADS1115 channel.
+* **Reset database via UI:** go to `/settings` and click **Reset Database** to clear all events and images (useful during testing).
+* **Diagnose scale issues:** the Live Weight card on the dashboard shows a real-time stability progress bar and the current detector state (idle / stabilizing / cooldown).
