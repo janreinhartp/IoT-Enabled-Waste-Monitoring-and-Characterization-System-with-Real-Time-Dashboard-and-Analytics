@@ -69,13 +69,13 @@ class ADS1115Scale:
         import board  # type: ignore[import-not-found]
         import busio  # type: ignore[import-not-found]
         import adafruit_ads1x15.ads1115 as ADS  # type: ignore[import-not-found]
-        from adafruit_ads1x15.ads1x15 import P1  # type: ignore[import-not-found]
+        from adafruit_ads1x15.ads1x15 import Pin  # type: ignore[import-not-found]
         from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore[import-not-found]
 
         self._i2c = busio.I2C(board.SCL, board.SDA)
         self._ads = ADS.ADS1115(self._i2c, address=i2c_address)
         self._ads.gain = _nearest_gain(gain)
-        self._chan = AnalogIn(self._ads, P1)  # Channel 1 (AIN1)
+        self._chan = AnalogIn(self._ads, Pin.A1)  # Channel 1 (AIN1)
         self._calibration_factor = calibration_factor
         self._tare_offset = tare_offset
 
