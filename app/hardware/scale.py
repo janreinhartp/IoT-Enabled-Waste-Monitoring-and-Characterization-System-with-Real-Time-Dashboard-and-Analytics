@@ -75,7 +75,7 @@ class ADS1115Scale:
         self._i2c = busio.I2C(board.SCL, board.SDA)
         self._ads = ADS.ADS1115(self._i2c, address=i2c_address)
         self._ads.gain = _nearest_gain(gain)
-        self._chan = AnalogIn(self._ads, Pin.A1)  # Channel 1 (AIN1)
+        self._chan = AnalogIn(self._ads, Pin.A0)  # Channel 0 (AIN0)
         self._calibration_factor = calibration_factor
         self._tare_offset = tare_offset
 
@@ -124,7 +124,7 @@ def build_scale(cfg: AppConfig) -> Scale:
         log.info("Using MockScale (set hardware.use_mock=false to use real hardware)")
         return MockScale()
     sc = cfg.hardware.scale
-    log.info("Initializing ADS1115 at 0x%02X, channel 1", sc.i2c_address)
+    log.info("Initializing ADS1115 at 0x%02X, channel 0", sc.i2c_address)
     return ADS1115Scale(
         i2c_address=sc.i2c_address,
         gain=sc.gain,
