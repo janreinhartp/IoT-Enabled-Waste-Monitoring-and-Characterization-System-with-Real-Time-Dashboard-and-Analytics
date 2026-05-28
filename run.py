@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+# eventlet.monkey_patch() MUST be called before any other imports so that
+# stdlib socket/threading/time are replaced with eventlet-aware versions.
+# Without this the MJPEG streaming generator blocks the greenlet scheduler
+# and the camera feed never reaches the browser.
+import eventlet
+
+eventlet.monkey_patch()
+
 import argparse
 import signal
 import sys
