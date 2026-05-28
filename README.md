@@ -12,7 +12,7 @@ An IoT system that **weighs** an item placed on a load-cell scale, **identifies*
 | BSS138 bidirectional I²C level shifter | Translates 3.3 V Pi I²C ↔ 5 V ADS1115 logic. |
 | USB camera | Plugged into any USB port. |
 
-Enable I²C on the Pi with `sudo raspi-config` → *Interface Options* → *I2C*.
+Enable I²C on the Pi — see [step 1a below](#1a--enable-i2c).
 
 ## Wiring
 
@@ -111,8 +111,46 @@ Open <http://localhost:5000>. The mock scale simulates items being placed and re
 
 ```bash
 sudo apt update
-sudo apt install -y python3-pip python3-venv python3-opencv i2c-tools libatlas-base-dev
+sudo apt install -y python3-pip python3-venv python3-opencv i2c-tools libopenblas-dev
 ```
+
+### 1a — Enable I²C
+
+**Option A — raspi-config (easiest)**
+
+```bash
+sudo raspi-config
+```
+
+Navigate to *Interface Options* → *I2C* → *Yes* → *Finish*, then reboot:
+
+```bash
+sudo reboot
+```
+
+**Option B — manual (Trixie / Bookworm)**
+
+On Raspberry Pi OS Trixie and Bookworm the boot config is at `/boot/firmware/config.txt` (not `/boot/config.txt`):
+
+```bash
+# Add the I2C overlay if it is not already present
+grep -q 'dtparam=i2c_arm=on' /boot/firmware/config.txt \
+  || echo 'dtparam=i2c_arm=on' | sudo tee -a /boot/firmware/config.txt
+
+# Make sure the i2c-dev module loads at boot
+grep -q 'i2c-dev' /etc/modules \
+  || echo 'i2c-dev' | sudo tee -a /etc/modules
+
+sudo reboot
+```
+
+After the reboot, confirm the device node exists:
+
+```bash
+ls /dev/i2c*   # should show /dev/i2c-1
+```
+
+> **Note:** `libatlas-base-dev` was removed from Raspberry Pi OS Bookworm (Debian 12) and is not present in Trixie (Debian 13) either. Use `libopenblas-dev` instead — it provides the same BLAS/LAPACK functionality required by NumPy and SciPy on ARM.
 
 ### 2 — Verify the ADS1115 is detected on I²C
 
@@ -120,6 +158,8 @@ sudo apt install -y python3-pip python3-venv python3-opencv i2c-tools libatlas-b
 i2cdetect -y 1
 # You should see 0x48 in the output
 ```
+
+> If you get `Could not open file '/dev/i2c-1'`, I²C is not enabled yet — go back to **step 1a**.
 
 ### 3 — Python environment
 
@@ -174,6 +214,110 @@ python run.py
 ```
 
 Open `http://<pi-ip>:5000` in a browser on the same network.
+
+---
+
+## Static IP & Local Network Access
+
+The Flask server already binds to `0.0.0.0`, so every device on your Wi-Fi/LAN can reach it.  
+Setting a **static IP** on the Pi gives it a predictable address you can bookmark like a website.
+
+### Find your current network details first
+
+```bash
+ip route show default   # note: gateway IP and interface name (e.g. eth0 or wlan0)
+ip addr show wlan0      # note: current IP and prefix length (e.g. 192.168.1.x/24)
+```
+
+---
+
+### Raspberry Pi OS **Trixie** (Debian 13), **Bookworm** (Debian 12) — NetworkManager / `nmcli`
+
+```bash
+# List connection names
+nmcli connection show
+
+# Apply a static IP (replace values to match your network)
+sudo nmcli connection modify "preconfigured" \
+  ipv4.method manual \
+  ipv4.addresses 192.168.1.100/24 \
+  ipv4.gateway 192.168.1.1 \
+  ipv4.dns "8.8.8.8 8.8.4.4"
+
+sudo nmcli connection up "preconfigured"
+```
+
+> Replace `"preconfigured"` with your actual connection name shown by `nmcli connection show`.  
+> Replace `192.168.1.100` with the address you want, and `192.168.1.1` with your router's IP.
+
+---
+
+### Raspberry Pi OS **Bullseye** (Debian 11) and older — `dhcpcd`
+
+Add the following block to the **bottom** of `/etc/dhcpcd.conf`:
+
+```
+interface wlan0          # use eth0 for wired ethernet
+static ip_address=192.168.1.100/24
+static routers=192.168.1.1
+static domain_name_servers=8.8.8.8 8.8.4.4
+```
+
+Apply:
+
+```bash
+sudo systemctl restart dhcpcd
+```
+
+---
+
+### Access the dashboard
+
+Once the static IP is set, open this in any browser on the same network:
+
+```
+http://192.168.1.100:5000
+```
+
+---
+
+### Optional — remove the port number (access like a plain website)
+
+Port 80 is the default HTTP port, so browsers don't require you to type `:5000`.  
+Non-root processes cannot bind port 80 directly; use `authbind`:
+
+```bash
+sudo apt install -y authbind
+sudo touch /etc/authbind/byport/80
+sudo chown pi /etc/authbind/byport/80
+sudo chmod 755 /etc/authbind/byport/80
+```
+
+Edit `config.yaml`:
+
+```yaml
+web:
+  host: 0.0.0.0
+  port: 80
+```
+
+Start the app through `authbind`:
+
+```bash
+authbind --deep python run.py
+```
+
+Or update the systemd `ExecStart` line (see [Auto-start on boot](#auto-start-on-boot-systemd)):
+
+```ini
+ExecStart=authbind --deep /home/pi/IoT-Waste-Monitor/.venv/bin/python run.py
+```
+
+Now the dashboard is reachable at just:
+
+```
+http://192.168.1.100
+```
 
 ---
 
