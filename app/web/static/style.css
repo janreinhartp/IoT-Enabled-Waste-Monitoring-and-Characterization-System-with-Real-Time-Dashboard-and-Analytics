@@ -25,3 +25,6 @@ table th { font-weight: 600; color: #374151; background: #f9fafb; }
 table a { color: #047857; }
 h2 { margin-top: 0; font-size: 1.05rem; }
 canvas { max-width: 100%; }
+.live-feed-card { padding: 1.25rem; }
+.live-feed-wrap { background: #000; border-radius: 0.5rem; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 240px; }
+.live-feed-wrap img { width: 100%; max-height: 480px; object-fit: contain; display: block; }

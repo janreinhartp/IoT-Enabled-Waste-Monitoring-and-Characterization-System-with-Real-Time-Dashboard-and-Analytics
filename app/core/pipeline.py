@@ -48,6 +48,7 @@ class Pipeline:
         camera: Camera,
         detector: Detector,
         db: Database,
+        camera_lock: Optional[threading.Lock] = None,
         on_event: Optional[EventCallback] = None,
         on_weight: Optional[WeightCallback] = None,
         on_bin_status: Optional[BinStatusCallback] = None,
@@ -55,6 +56,7 @@ class Pipeline:
         self._cfg = cfg
         self._scale = scale
         self._camera = camera
+        self._camera_lock = camera_lock
         self._detector = detector
         self._db = db
         self._on_event = on_event
@@ -199,6 +201,9 @@ class Pipeline:
 
     def _safe_capture(self) -> Optional[np.ndarray]:
         try:
+            if self._camera_lock is not None:
+                with self._camera_lock:
+                    return self._camera.capture()
             return self._camera.capture()
         except Exception:  # noqa: BLE001
             log.exception("Camera capture failed")

@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import io
 import os
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -32,7 +34,15 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def register(app: Flask, socketio: SocketIO, cfg: AppConfig, db: Database) -> None:
+def register(
+    app: Flask,
+    socketio: SocketIO,
+    cfg: AppConfig,
+    db: Database,
+    *,
+    camera=None,
+    camera_lock: Optional[threading.Lock] = None,
+) -> None:
     """Register all HTTP routes and Socket.IO handlers."""
 
     # Module-level state so broadcast_bin_status can update it and on_connect
@@ -137,6 +147,41 @@ def register(app: Flask, socketio: SocketIO, cfg: AppConfig, db: Database) -> No
         if not os.path.isfile(path):
             abort(404)
         return send_file(path, mimetype="image/jpeg")
+
+    # ---- Live camera MJPEG stream ----
+
+    @app.get("/video_feed")
+    def video_feed():
+        if camera is None:
+            abort(404)
+
+        def _generate():
+            import cv2  # noqa: WPS433
+            _lock = camera_lock or threading.Lock()
+            while True:
+                with _lock:
+                    frame = camera.capture()
+                if frame is None:
+                    time.sleep(0.1)
+                    continue
+                ok, buf = cv2.imencode(
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70]
+                )
+                if not ok:
+                    time.sleep(0.1)
+                    continue
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n"
+                    + buf.tobytes()
+                    + b"\r\n"
+                )
+                time.sleep(1 / 15)  # ~15 fps
+
+        return Response(
+            _generate(),
+            mimetype="multipart/x-mixed-replace; boundary=frame",
+        )
 
     # ---- Socket.IO ----
 

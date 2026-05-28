@@ -38,21 +38,27 @@ def main(argv: list[str] | None = None) -> int:
     # Build Flask + SocketIO
     from app.web.routes import broadcast_event, broadcast_weight, broadcast_bin_status
     from app.web.server import create_app
-
-    app, socketio = create_app(cfg, db)
+    import threading
 
     pipeline = None
+    camera = None
+    camera_lock = threading.Lock()
     if not args.no_pipeline:
         log.info("Initializing hardware (use_mock=%s)", cfg.hardware.use_mock)
         scale = build_scale(cfg)
         camera = build_camera(cfg)
         detector = build_detector(cfg)
+
+    app, socketio = create_app(cfg, db, camera=camera, camera_lock=camera_lock)
+
+    if not args.no_pipeline:
         pipeline = Pipeline(
             cfg,
             scale=scale,
             camera=camera,
             detector=detector,
             db=db,
+            camera_lock=camera_lock,
             on_event=lambda rec: broadcast_event(socketio, rec.to_dict()),
             on_weight=lambda g: broadcast_weight(socketio, g),
             on_bin_status=lambda full: broadcast_bin_status(app, socketio, full),

@@ -28,6 +28,17 @@
   </div>
 </section>
 
+<section class="card live-feed-card">
+  <div class="label" style="margin-bottom:0.75rem">Live Camera Feed</div>
+  <div class="live-feed-wrap">
+    <img id="live-feed"
+         src="/video_feed"
+         alt="Live camera feed"
+         onerror="this.style.display='none'; document.getElementById('feed-unavailable').style.display='block'">
+    <p id="feed-unavailable" style="display:none;color:#6b7280;">Camera not available (mock mode or no-pipeline).</p>
+  </div>
+</section>
+
 <section class="card">
   <h2>Recent Events</h2>
   <table id="events-table">

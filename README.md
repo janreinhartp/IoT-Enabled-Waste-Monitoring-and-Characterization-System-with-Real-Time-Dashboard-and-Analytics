@@ -176,24 +176,64 @@ python -m scripts.download_model
 
 ### 5 — Configure
 
+**Step 1 — make a copy of the example config file**
+
 ```bash
 cp config.example.yaml config.yaml
 ```
 
-Open `config.yaml` and set:
+This creates your personal `config.yaml` from the provided template. You only edit `config.yaml` — never the `config.example.yaml` original.
+
+---
+
+**Step 2 — open the file in a text editor**
+
+`nano` is a simple text editor built into Raspberry Pi OS. Type:
+
+```bash
+nano config.yaml
+```
+
+The file will open right in the terminal. You can scroll up/down with the arrow keys.
+
+---
+
+**Step 3 — change these two settings**
+
+Find the line that says `use_mock: true` and change it to `false`:
 
 ```yaml
 hardware:
-  use_mock: false          # use real ADS1115 + USB camera
-  scale:
-    i2c_address: 0x48      # ADS1115 default (ADDR pin → GND)
-    gain: 0.6667           # 2/3 = ±6.144V PGA, covers full 0–5V range
-    tare_offset: 0.0       # filled in by calibrate_scale.py
-    calibration_factor: 1.0  # filled in by calibrate_scale.py
-
-ai:
-  backend: tflite
+  use_mock: false        # ← change true to false (tells the system to use real hardware)
 ```
+
+Find the line that says `backend: mock` and change it to `tflite`:
+
+```yaml
+ai:
+  backend: tflite        # ← change mock to tflite (uses the AI model you downloaded)
+```
+
+> **What is a YAML file?** It is a plain settings file. Each line is `setting-name: value`.  
+> Lines that start with `#` are comments — they are ignored by the program, they are just notes for you.  
+> **Indentation matters** — do not add or remove the spaces at the start of lines.
+
+---
+
+**Step 4 — save and exit nano**
+
+1. Press **Ctrl + O** (the letter O, not zero) — this saves the file. Press **Enter** to confirm the filename.
+2. Press **Ctrl + X** — this closes nano and returns you to the terminal.
+
+---
+
+**Step 5 — verify it saved correctly** *(optional but recommended)*
+
+```bash
+cat config.yaml
+```
+
+This prints the file so you can check your changes look right.
 
 ### 6 — Calibrate the scale
 
@@ -213,7 +253,32 @@ Copy the printed `tare_offset` and `calibration_factor` values into `config.yaml
 python run.py
 ```
 
-Open `http://<pi-ip>:5000` in a browser on the same network.
+You will see a line in the output like:
+
+```
+Web server listening on http://0.0.0.0:5000
+```
+
+> **Do not** type `http://0.0.0.0:5000` into your browser — that address means  
+> "listen on every network interface" and cannot be opened directly.
+
+**Find the Pi's real IP address** (open a second terminal or run this before starting):
+
+```bash
+hostname -I
+```
+
+This prints something like `192.168.1.105`. Use that number.
+
+**Then open the dashboard:**
+
+| Where you are | Address to type in your browser |
+|---|---|
+| On the Pi itself | `http://localhost:5000` |
+| On another device (phone, laptop) on the same Wi-Fi | `http://192.168.1.105:5000` *(use your actual IP)* |
+
+> **Tip:** To keep the server running after you close the terminal, see  
+> [Auto-start on boot](#auto-start-on-boot-systemd) or run it with `nohup python run.py &`.
 
 ---
 
