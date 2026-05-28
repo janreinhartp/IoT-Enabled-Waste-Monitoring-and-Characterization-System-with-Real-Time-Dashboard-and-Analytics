@@ -54,6 +54,43 @@ A single Python process runs:
 3. On each event: capture a USB-camera frame → run a TFLite object detector → map the label to a waste category → save the image → insert a row in SQLite → push a Socket.IO message.
 4. A Flask + Flask-SocketIO web server with a live dashboard and analytics page.
 
+## How an Item is Recorded
+
+When something is placed on the scale the system goes through the following steps:
+
+```
+Scale polling (~10 Hz)
+    │
+    ▼
+StableEventDetector.push(grams)
+    │  Collects a rolling window of samples.
+    │  Fires only when:
+    │    • weight ≥ min_weight_g (default 5 g)
+    │    • stddev of last N samples ≤ stability_g (default 1 g)
+    ▼
+Pipeline._handle_event(weight_g)
+    │
+    ├─ camera.capture()           → grabs one frame from the USB camera
+    ├─ detector.detect_all(frame) → TFLite EfficientDet identifies objects,
+    │                               returns list of Detection(label, category, confidence)
+    ├─ save_jpeg(frame, path)     → saves image to data/images/<uuid>.jpg
+    │
+    └─ for each detection:
+           db.insert_event(...)   → writes one row to the waste_events SQLite table
+           socketio.emit(...)     → pushes "new_event" to the live dashboard
+```
+
+**Important rules:**
+
+| Rule | Detail |
+|---|---|
+| Event skipped if nothing detected | If the AI finds no recognisable object in the frame the event is not saved. |
+| Weight split equally | If multiple objects are detected in one frame the total weight is divided equally between them. |
+| Reset required between events | After an event fires the weight must drop below `reset_threshold_g` (default 2 g) before the next event is accepted. |
+| Bin capacity check | If the total weight reaches `events.capacity_kg` the pipeline pauses and the dashboard shows a "bin full" warning until the bin is emptied. |
+
+---
+
 ## Project Layout
 
 ```

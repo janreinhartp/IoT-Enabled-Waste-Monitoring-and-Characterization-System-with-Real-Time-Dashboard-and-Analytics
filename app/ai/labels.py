@@ -11,21 +11,43 @@ from typing import Dict, List, Optional
 
 # Detection-label (lowercase) -> waste category slug
 LABEL_TO_CATEGORY: Dict[str, str] = {
-    # Plastic
+    # ── Plastic ──────────────────────────────────────────────────────────────
     "bottle": "plastic",
     "cup": "plastic",
-    # Paper / cardboard
+    "bowl": "plastic",
+    "plastic bag": "plastic",
+    "bag": "plastic",
+    "container": "plastic",
+    "straw": "plastic",
+    "toothbrush": "plastic",
+    "hair drier": "plastic",
+    "remote": "plastic",
+    "cell phone": "plastic",
+    "keyboard": "plastic",
+    "mouse": "plastic",
+
+    # ── Paper / cardboard ────────────────────────────────────────────────────
     "book": "paper",
     "newspaper": "paper",
-    # Metal
+    "magazine": "paper",
+    "cardboard": "paper",
+    "box": "paper",
+
+    # ── Metal ────────────────────────────────────────────────────────────────
     "can": "metal",
     "fork": "metal",
     "knife": "metal",
     "spoon": "metal",
-    # Glass
+    "scissors": "metal",
+    "tin can": "metal",
+    "tin": "metal",
+    "aluminum can": "metal",
+
+    # ── Glass ────────────────────────────────────────────────────────────────
     "wine glass": "glass",
     "vase": "glass",
     "jar": "glass",
+    "glass bottle": "glass",
 }
 
 

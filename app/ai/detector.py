@@ -119,29 +119,46 @@ class TFLiteDetector:
         self._interpreter.set_tensor(self._input_details[0]["index"], input_tensor)
         self._interpreter.invoke()
 
-        # EfficientDet-Lite output order: boxes(0), classes(1), scores(2), num(3)
-        outs = [self._interpreter.get_tensor(d["index"]) for d in self._output_details]
-        scores = None
-        classes = None
-        for arr in outs:
-            sq = np.squeeze(arr)
-            if sq.ndim == 1 and scores is None and 0.0 <= float(sq.max(initial=0.0)) <= 1.0:
-                if classes is None:
-                    scores = sq
-                    continue
-            if sq.ndim == 1 and classes is None and scores is not None:
-                classes = sq
+        # EfficientDet-Lite / SSD MobileNet TFLite output layout (4 tensors):
+        #   [0] boxes      float32 [1, N, 4]
+        #   [1] class_ids  float32 [1, N]
+        #   [2] scores     float32 [1, N]
+        #   [3] count      float32 [1]
+        # Use output tensor names to locate scores and classes robustly.
+        scores_arr: Optional[np.ndarray] = None
+        classes_arr: Optional[np.ndarray] = None
+        for detail in self._output_details:
+            name = detail.get("name", "").lower()
+            tensor = np.squeeze(self._interpreter.get_tensor(detail["index"]))
+            if tensor.ndim != 1:
+                continue
+            if "score" in name or "confidence" in name:
+                scores_arr = tensor
+            elif "class" in name or "category" in name or "label" in name:
+                classes_arr = tensor
 
-        if scores is None or classes is None:
+        # Fall back to positional order (index 1 = classes, index 2 = scores)
+        # if names were not informative enough.
+        if scores_arr is None or classes_arr is None:
+            outs = [
+                np.squeeze(self._interpreter.get_tensor(d["index"]))
+                for d in self._output_details
+            ]
+            one_d = [a for a in outs if a.ndim == 1]
+            if len(one_d) >= 2:
+                classes_arr = one_d[0]   # first 1-D output = class IDs
+                scores_arr = one_d[1]    # second 1-D output = scores
+
+        if scores_arr is None or classes_arr is None:
             log.warning("Could not parse TFLite outputs; no detections emitted")
             return []
 
         results: List[Detection] = []
-        for i in range(len(scores)):
-            score = float(scores[i])
+        for i in range(len(scores_arr)):
+            score = float(scores_arr[i])
             if score < self._min_confidence:
                 continue
-            class_idx = int(classes[i])
+            class_idx = int(classes_arr[i])
             label = (
                 self._labels[class_idx]
                 if 0 <= class_idx < len(self._labels)
@@ -150,6 +167,8 @@ class TFLiteDetector:
             cat = category_for(label)
             if cat is not None:
                 results.append(Detection(label=label, category=cat, confidence=score))
+            else:
+                log.debug("Detected '%s' (%.2f) — no waste category mapping, skipped", label, score)
         return results
 
 
