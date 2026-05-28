@@ -24,6 +24,7 @@ log = get_logger(__name__)
 EventCallback = Callable[[WasteEventRecord], None]
 WeightCallback = Callable[[float], None]
 BinStatusCallback = Callable[[bool], None]
+ScaleStatusCallback = Callable[[dict], None]
 
 
 class Pipeline:
@@ -52,6 +53,7 @@ class Pipeline:
         on_event: Optional[EventCallback] = None,
         on_weight: Optional[WeightCallback] = None,
         on_bin_status: Optional[BinStatusCallback] = None,
+        on_scale_status: Optional[ScaleStatusCallback] = None,
     ):
         self._cfg = cfg
         self._scale = scale
@@ -62,6 +64,7 @@ class Pipeline:
         self._on_event = on_event
         self._on_weight = on_weight
         self._on_bin_status = on_bin_status
+        self._on_scale_status = on_scale_status
         self._detector_state = StableEventDetector(
             min_weight_g=cfg.events.min_weight_g,
             stability_window=cfg.events.stability_window,
@@ -151,6 +154,21 @@ class Pipeline:
             event = self._detector_state.push(grams)
             if event is not None and not self._bin_full:
                 self._handle_event(event.weight_grams)
+
+            # Broadcast scale detector status for the dashboard
+            if self._on_scale_status:
+                window_size = len(self._detector_state._window)
+                try:
+                    self._on_scale_status({
+                        "state": self._detector_state.state,
+                        "weight_g": round(grams, 1),
+                        "window_samples": window_size,
+                        "stability_window": self._cfg.events.stability_window,
+                        "min_weight_g": self._cfg.events.min_weight_g,
+                        "stability_g": self._cfg.events.stability_g,
+                    })
+                except Exception:  # noqa: BLE001
+                    log.exception("on_scale_status callback failed")
 
             # Sleep for the remainder of the interval
             elapsed = time.monotonic() - t0

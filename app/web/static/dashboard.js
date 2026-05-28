@@ -4,6 +4,8 @@
 
   const liveWeightEl = document.getElementById("live-weight");
   const liveStateEl = document.getElementById("live-state");
+  const scaleBarEl = document.getElementById("scale-status-bar");
+  const scaleDetailEl = document.getElementById("scale-status-detail");
   const latestCard = document.getElementById("latest-card");
   const tbody = document.querySelector("#events-table tbody");
 
@@ -18,6 +20,55 @@
     if (!liveWeightEl) return;
     const g = Number(msg.grams || 0);
     liveWeightEl.innerHTML = g.toFixed(1) + ' <span class="unit">g</span>';
+  });
+
+  const STATE_LABELS = {
+    idle: "⏳ Waiting for item (min " ,
+    stabilizing: "📊 Stabilizing…",
+    cooldown: "✅ Recorded — remove item to reset",
+  };
+  const STATE_COLORS = {
+    idle: "#6b7280",
+    stabilizing: "#f59e0b",
+    cooldown: "#10b981",
+  };
+
+  socket.on("scale_status", (s) => {
+    if (!liveStateEl) return;
+    const state = s.state || "idle";
+    const color = STATE_COLORS[state] || "#6b7280";
+
+    // State label
+    let label;
+    if (state === "idle") {
+      label = "⏳ Waiting — need ≥ " + s.min_weight_g + " g";
+    } else if (state === "stabilizing") {
+      label = "📊 Stabilizing… (" + s.window_samples + " / " + s.stability_window + " samples)";
+    } else {
+      label = "✅ Recorded — remove item to reset";
+    }
+    liveStateEl.textContent = label;
+    liveStateEl.style.color = color;
+
+    // Progress bar (stability window fill)
+    if (scaleBarEl) {
+      const pct = state === "stabilizing"
+        ? Math.min(100, Math.round((s.window_samples / s.stability_window) * 100))
+        : state === "cooldown" ? 100 : 0;
+      scaleBarEl.style.width = pct + "%";
+      scaleBarEl.style.background = color;
+    }
+
+    // Detail line
+    if (scaleDetailEl) {
+      if (state === "stabilizing") {
+        scaleDetailEl.textContent =
+          "Weight: " + s.weight_g + " g  |  Need " +
+          s.stability_window + " stable samples within ±" + s.stability_g + " g stddev";
+      } else {
+        scaleDetailEl.textContent = "";
+      }
+    }
   });
 
   function escapeHtml(s) {

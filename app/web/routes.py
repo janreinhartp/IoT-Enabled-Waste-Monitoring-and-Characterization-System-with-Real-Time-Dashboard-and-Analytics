@@ -229,3 +229,8 @@ def broadcast_bin_status(app: Flask, socketio: SocketIO, is_full: bool) -> None:
     if bin_state is not None:
         bin_state["full"] = is_full
     socketio.emit("bin_status", {"bin_full": is_full})
+
+
+def broadcast_scale_status(socketio: SocketIO, status: dict) -> None:
+    """Push scale detector state to all connected clients."""
+    socketio.emit("scale_status", status)
