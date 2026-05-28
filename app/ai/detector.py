@@ -92,11 +92,15 @@ class TFLiteDetector:
         if not os.path.isfile(labels_path):
             raise FileNotFoundError(f"Labels not found: {labels_path}")
 
-        # Prefer tflite_runtime on the Pi; fall back to full TF if installed.
+        # Prefer tflite_runtime on the Pi; fall back to ai_edge_litert (the
+        # package installed by ai-edge-litert on Python 3.12+), then full TF.
         try:
             from tflite_runtime.interpreter import Interpreter  # type: ignore
         except ImportError:  # pragma: no cover - fallback path
-            from tensorflow.lite.python.interpreter import Interpreter  # type: ignore
+            try:
+                from ai_edge_litert.interpreter import Interpreter  # type: ignore
+            except ImportError:
+                from tensorflow.lite.python.interpreter import Interpreter  # type: ignore
 
         self._interpreter = Interpreter(model_path=model_path)
         self._interpreter.allocate_tensors()
