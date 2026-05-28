@@ -221,8 +221,12 @@ class Pipeline:
     def _save_image(self, frame: np.ndarray) -> Optional[str]:
         try:
             name = f"{int(time.time())}-{uuid.uuid4().hex[:8]}.jpg"
-            full = os.path.join(self._cfg.storage.images_dir, name)
+            # Always store an absolute path so the web server can find the
+            # file regardless of the working directory at serve time.
+            full = os.path.abspath(os.path.join(self._cfg.storage.images_dir, name))
+            os.makedirs(os.path.dirname(full), exist_ok=True)
             save_jpeg(frame, full, quality=self._cfg.hardware.camera.jpeg_quality)
+            log.debug("Image saved: %s", full)
             return full
         except Exception:  # noqa: BLE001
             log.exception("Image save failed")

@@ -144,9 +144,11 @@ def register(
             if ev is None or not ev.image_path:
                 abort(404)
             path = ev.image_path
-        if not os.path.isfile(path):
+        # Resolve to absolute so send_file works regardless of cwd.
+        abs_path = os.path.abspath(path)
+        if not os.path.isfile(abs_path):
             abort(404)
-        return send_file(path, mimetype="image/jpeg")
+        return send_file(abs_path, mimetype="image/jpeg")
 
     # ---- Live camera MJPEG stream ----
 
