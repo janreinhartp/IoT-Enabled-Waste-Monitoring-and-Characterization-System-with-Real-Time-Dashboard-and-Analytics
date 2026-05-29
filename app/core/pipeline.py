@@ -105,6 +105,21 @@ class Pipeline:
     def bin_full(self) -> bool:
         return self._bin_full
 
+    def record_now(self) -> None:
+        """Manually trigger a record using the current live weight.
+
+        Runs in a background thread so the caller returns immediately.
+        Useful for prototyping when the scale reading is noisy and the
+        stable-event detector never fires.
+        """
+        weight = self._latest_weight
+        threading.Thread(
+            target=self._handle_event,
+            args=(weight,),
+            name="waste-manual-record",
+            daemon=True,
+        ).start()
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------

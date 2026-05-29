@@ -73,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             on_scale_status=lambda s: broadcast_scale_status(socketio, s),
         )
         pipeline.start()
+        app.config["WASTE_PIPELINE"] = pipeline
 
     def _shutdown(*_args):
         log.info("Shutting down…")

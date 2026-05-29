@@ -128,6 +128,15 @@ def register(
         deleted = db.reset_events()
         return jsonify({"deleted": deleted, "status": "ok"})
 
+    @app.post("/api/record")
+    def api_record():
+        """Manually trigger a record at the current live weight."""
+        pipeline = app.config.get("WASTE_PIPELINE")
+        if pipeline is None:
+            return jsonify({"error": "Pipeline not running (start without --no-pipeline)."}), 400
+        pipeline.record_now()
+        return jsonify({"status": "recording", "weight_g": round(pipeline.latest_weight, 1)})
+
     # ---- Scale calibration ----
 
     @app.get("/api/calibrate/status")

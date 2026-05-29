@@ -115,4 +115,33 @@
     renderLatest(e);
     prependRow(e);
   });
+
+  // ---- Manual record button ----
+  const btnRecord = document.getElementById("btn-record");
+  const recordFeedback = document.getElementById("record-feedback");
+
+  function setFeedback(msg, ok) {
+    if (!recordFeedback) return;
+    recordFeedback.textContent = msg;
+    recordFeedback.style.color = ok ? "#10b981" : "#ef4444";
+    clearTimeout(recordFeedback._timer);
+    recordFeedback._timer = setTimeout(() => { recordFeedback.textContent = ""; }, 4000);
+  }
+
+  if (btnRecord) {
+    btnRecord.addEventListener("click", () => {
+      btnRecord.disabled = true;
+      fetch("/api/record", { method: "POST" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.error) {
+            setFeedback("Error: " + data.error, false);
+          } else {
+            setFeedback("Recording at " + data.weight_g + " g…", true);
+          }
+        })
+        .catch(() => setFeedback("Request failed.", false))
+        .finally(() => { btnRecord.disabled = false; });
+    });
+  }
 })();
