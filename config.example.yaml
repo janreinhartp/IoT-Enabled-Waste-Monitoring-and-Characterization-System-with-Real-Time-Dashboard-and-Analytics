@@ -45,14 +45,24 @@ events:
 
 # ---- AI Detection ----
 ai:
-  # 'tflite' for TensorFlow Lite, 'mock' for development without a model
+  # 'mock'           - development mode, no model needed
+  # 'tflite'         - EfficientDet-Lite0 COCO object-detection model (default)
+  # 'classification' - image-classification model (Google Teachable Machine TFLite export)
+  #                    Name your Teachable Machine classes: plastic / paper / metal / glass / organic
   backend: mock
+
+  # --- tflite (COCO object detection) ---
   model_path: app/ai/models/efficientdet_lite0.tflite
   labels_path: app/ai/models/coco_labels.txt
+  input_size: 320       # EfficientDet-Lite0 expects 320×320
+
+  # --- classification (Teachable Machine) --- uncomment and change these:
+  # model_path: app/ai/models/waste_classifier.tflite
+  # labels_path: app/ai/models/waste_labels.txt
+  # input_size: 224     # Teachable Machine exports expect 224×224
+
   # Minimum confidence (0-1) to accept a detection
   min_confidence: 0.4
-  # Input image size expected by model (square)
-  input_size: 320
 
 # ---- Database ----
 database:

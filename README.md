@@ -1,6 +1,6 @@
 # IoT-Enabled Waste Monitoring and Characterization System
 
-An IoT system that **weighs** an item placed on a load-cell scale, **identifies** it with computer vision, **categorizes** it (plastic, paper, metal, glass, organic, residual), **stores** the event locally, and shows it in a **real-time web dashboard** with analytics — all running on a Raspberry Pi.
+An IoT system that **weighs** an item placed on a load-cell scale, **identifies** it with computer vision, **categorizes** it (plastic, paper, metal, glass, organic), **stores** the event locally, and shows it in a **real-time web dashboard** with analytics — all running on a Raspberry Pi.
 
 ## Hardware
 
@@ -157,7 +157,7 @@ A **12V / 3A** (36 W) PSU with a buck converter rated ≥ 3 A is sufficient.
 A single Python process runs:
 1. A background thread sampling the ADS1115 channel 1 voltage at ~10 Hz.
 2. A stable-event detector that fires only when the derived weight is above a threshold **and** stable for a configurable window (ignores oscillation and adjustments).
-3. On each event: capture a USB-camera frame → run a TFLite object detector → map the label to a waste category → save the image → insert a row in SQLite → push a Socket.IO message.
+3. On each event: capture a USB-camera frame → run a TFLite model (object detector **or** image classifier) → map the label to a waste category → save the image → insert a row in SQLite → push a Socket.IO message.
 4. A Flask + Flask-SocketIO web server with a live dashboard and analytics page.
 
 ## How an Item is Recorded
@@ -174,10 +174,11 @@ StableEventDetector.push(grams)
     │    • weight ≥ min_weight_g (default 5 g)
     │    • stddev of last N samples ≤ stability_g (default 1 g)
     ▼
-Pipeline._handle_event(weight_g)
+Pipeline._handle_event(weight_g)   ← also triggered manually by „Record Now“ button
     │
     ├─ camera.capture()           → grabs one frame from the USB camera
-    ├─ detector.detect_all(frame) → TFLite EfficientDet identifies objects,
+    ├─ detector.detect_all(frame) → TFLite model identifies the item
+    │                               (object-detection or image-classification backend)
     │                               returns list of Detection(label, category, confidence)
     ├─ save_jpeg(frame, path)     → saves image to data/images/<uuid>.jpg
     │
@@ -190,7 +191,8 @@ Pipeline._handle_event(weight_g)
 
 | Rule | Detail |
 |---|---|
-| Event skipped if nothing detected | If the AI finds no recognisable object in the frame the event is still saved, but the category and label are recorded as **unknown** with 0% confidence. |
+| Event skipped if nothing detected | If the AI finds no recognisable object in the frame the event is not saved. |
+| Manual record button | The **Record Now** button on the Live Weight card bypasses the stability check and records immediately at the current weight — useful when the scale is noisy. |
 | Weight split equally | If multiple objects are detected in one frame the total weight is divided equally between them. |
 | Reset required between events | After an event fires the weight must drop below `reset_threshold_g` (default 2 g) before the next event is accepted. |
 | Bin capacity check | If the total weight reaches `events.capacity_kg` the pipeline pauses and the dashboard shows a "bin full" warning until the bin is emptied. |
@@ -360,11 +362,22 @@ hardware:
   use_mock: false        # ← change true to false (tells the system to use real hardware)
 ```
 
-Find the line that says `backend: mock` and change it to `tflite`:
+Find the line that says `backend: mock` and change it to the AI backend you want to use:
 
 ```yaml
+# Option A — EfficientDet-Lite0 COCO model (downloaded in step 4)
 ai:
-  backend: tflite        # ← change mock to tflite (uses the AI model you downloaded)
+  backend: tflite
+  model_path: app/ai/models/efficientdet_lite0.tflite
+  labels_path: app/ai/models/coco_labels.txt
+  input_size: 320
+
+# Option B — Your own Teachable Machine model (see „Training a Waste Classifier“ below)
+ai:
+  backend: classification
+  model_path: app/ai/models/waste_classifier.tflite
+  labels_path: app/ai/models/waste_labels.txt
+  input_size: 224
 ```
 
 > **What is a YAML file?** It is a plain settings file. Each line is `setting-name: value`.  
@@ -389,6 +402,17 @@ cat config.yaml
 This prints the file so you can check your changes look right.
 
 ### 6 — Calibrate the scale
+
+You can calibrate the scale directly from the web dashboard (recommended) or via the command line.
+
+**Option A — Dashboard (recommended)**
+
+1. Start the system (`python run.py`) and open `http://Waste-Monitoring.local:5000/settings`.
+2. Under **Scale Calibration**, click **Tare Scale** with nothing on the platform.
+3. Enter your known reference weight in grams, place it on the platform, then click **Calibrate & Save**.
+4. The system saves the values to `config.yaml` and restarts automatically.
+
+**Option B — Command line**
 
 ```bash
 python -m scripts.calibrate_scale --known-weight 500
@@ -702,17 +726,19 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full annot
 |---|---|---|
 | `hardware.use_mock` | `true` | `false` to use real ADS1115 + USB camera |
 | `hardware.scale.i2c_address` | `0x48` | ADS1115 I²C address (ADDR pin → GND) |
-| `hardware.scale.gain` | `0.6667` | ADS1115 PGA: `0.6667`=±6.144 V, `1`=±4.096 V, `2`=±2.048 V. Value is snapped to nearest valid gain automatically. |
-| `hardware.scale.tare_offset` | `0.0` | Sensor voltage (V) at zero weight — set by `calibrate_scale.py` |
-| `hardware.scale.calibration_factor` | `1.0` | Volts per gram (V/g) — set by `calibrate_scale.py` |
+| `hardware.scale.gain` | `0.6667` | ADS1115 PGA: `0.6667`=±6.144 V, `1`=±4.096 V, `2`=±2.048 V. Value is snapped to nearest valid gain automatically. |
+| `hardware.scale.tare_offset` | `0.0` | Sensor voltage (V) at zero weight — set via dashboard or `calibrate_scale.py` |
+| `hardware.scale.calibration_factor` | `1.0` | Volts per gram (V/g) — set via dashboard or `calibrate_scale.py` |
 | `hardware.scale.sample_rate_hz` | `10` | Target polling rate |
 | `events.min_weight_g` | `5.0` | Minimum weight (g) to start a placement event |
 | `events.stability_window` | `8` | Consecutive samples that must be within `stability_g` stddev |
 | `events.stability_g` | `1.0` | Max stddev (g) to declare a stable reading |
 | `events.reset_threshold_g` | `2.0` | Weight must drop below this to reset after an event |
 | `events.capacity_kg` | `100.0` | Bin capacity — pipeline pauses when exceeded |
-| `ai.backend` | `mock` | `mock` or `tflite` |
+| `ai.backend` | `mock` | `mock` / `tflite` (COCO object detection) / `classification` (Teachable Machine) |
 | `ai.model_path` | — | Path to `.tflite` model file |
+| `ai.labels_path` | — | Path to newline-separated labels file |
+| `ai.input_size` | `320` | Input image size in pixels (square). Use `224` for Teachable Machine models. |
 | `ai.min_confidence` | `0.4` | Minimum detection confidence (0–1) |
 | `database.url` | SQLite | SQLAlchemy URL (supports Postgres/MySQL too) |
 | `web.host` / `web.port` | `0.0.0.0:5000` | Flask bind address |
@@ -723,15 +749,19 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full annot
 
 | Route | Description |
 |---|---|
-| `GET /` | Live dashboard — weight, scale status bar, camera feed, latest item |
+| `GET /` | Live dashboard — weight, scale status bar, camera feed, latest item, Record Now button |
 | `GET /analytics` | Charts (per-category weight/counts, daily totals) |
-| `GET /settings` | Settings page — reset database |
+| `GET /settings` | Settings page — scale calibration + database reset |
 | `GET /api/events?limit=&offset=&category=&since=&until=` | List events (JSON) |
 | `GET /api/summary?window=all\|today\|week` | Aggregate stats |
 | `GET /api/daily?days=N` | Daily totals for the last N days |
 | `GET /api/categories` | Category list |
 | `GET /api/bin_status` | Current bin-full state and capacity |
+| `POST /api/record` | Manually trigger a record at the current live weight |
 | `POST /api/reset_db` | Delete all events and images, returns `{"deleted": N}` |
+| `GET /api/calibrate/status` | Returns current calibration values and whether a tare has been captured |
+| `POST /api/calibrate/tare` | Captures tare voltage (empty scale) |
+| `POST /api/calibrate/finish` | Computes calibration factor from known weight, saves to `config.yaml`, restarts |
 | `GET /api/events.csv` | Export all events as CSV |
 | `GET /images/<event_id>` | Captured image for an event |
 | `GET /video_feed` | MJPEG live camera stream |
@@ -739,6 +769,104 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full annot
 | Socket.IO `scale_status` | Scale detector state (idle/stabilizing/cooldown + progress) |
 | Socket.IO `new_event` | Pushed when a new placement is recorded |
 | Socket.IO `bin_status` | Pushed when bin-full state changes |
+
+---
+
+## Training a Waste Classifier
+
+The default EfficientDet-Lite0 model is trained on generic COCO objects (bottles, cans, forks, etc.) and will return "no detection" for items it doesn't recognise. For better accuracy, train your own classifier on photos of your actual waste items using **Google Teachable Machine** — no code required, takes about 15 minutes.
+
+### Why Teachable Machine?
+
+| | EfficientDet-Lite0 (COCO) | Teachable Machine |
+|---|---|---|
+| Setup | Download once | 15 min training |
+| Trained on | Generic objects | **Your actual items** |
+| Accuracy for waste | Moderate | High |
+| Exportable to TFLite | Yes (pre-made) | Yes (one click) |
+
+### Step 1 — Collect images
+
+Go to **https://teachablemachine.withgoogle.com** → *Get Started* → *Image Project* → *Standard image model*.
+
+Create one class per category. Name them **exactly**:
+
+```
+plastic
+paper
+metal
+glass
+organic
+```
+
+> The system matches these names directly to waste categories. Spelling and case matter.
+
+Collect photos using your webcam or upload images. Aim for **40–80 photos per class**, taken under your actual lighting conditions with your actual waste items.
+
+Tips for better accuracy:
+- Rotate the item and photograph it from multiple angles
+- Include a few photos with similar-looking items from the *wrong* class (helps the model learn differences)
+- Keep the camera distance and background consistent with how the system will be used
+
+### Step 2 — Train the model
+
+Click **Train Model**. Training takes 30–90 seconds in the browser. Once done, preview the model live with your webcam to check accuracy.
+
+### Step 3 — Export
+
+Click **Export Model** → *TensorFlow Lite* tab → select **Floating Point** → click **Download my model**.
+
+You receive a `.zip` file containing:
+- `model.tflite` — the trained model
+- `labels.txt` — one class name per line
+
+### Step 4 — Deploy to the Pi
+
+Copy both files to the Pi:
+
+```powershell
+# Windows — from the project root
+scp model.tflite pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/waste_classifier.tflite
+scp labels.txt   pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/waste_labels.txt
+```
+
+```bash
+# macOS / Linux
+scp model.tflite labels.txt pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/
+```
+
+### Step 5 — Update config.yaml
+
+SSH into the Pi and edit `config.yaml`:
+
+```bash
+nano config.yaml
+```
+
+Change the `ai:` section to:
+
+```yaml
+ai:
+  backend: classification
+  model_path: app/ai/models/waste_classifier.tflite
+  labels_path: app/ai/models/waste_labels.txt
+  input_size: 224          # Teachable Machine exports expect 224×224
+  min_confidence: 0.6      # raise threshold — classifier is more decisive than detector
+```
+
+Save (`Ctrl+O`, `Ctrl+X`) and restart:
+
+```bash
+sudo systemctl restart waste-monitor
+```
+
+### Retraining
+
+Repeat steps 1–5 whenever you want to add items or improve accuracy. You can keep the old model file as a backup by renaming it before replacing it:
+
+```bash
+mv app/ai/models/waste_classifier.tflite app/ai/models/waste_classifier_v1.tflite
+```
 
 ---
 
@@ -755,9 +883,11 @@ The test suite uses the mock scale, mock camera, and mock detector — no hardwa
 
 ## Extending
 
-* **Custom waste classifier:** swap the TFLite model and label-to-category map in `app/ai/labels.py` for a waste-specific classifier (e.g., TrashNet).
-* **Different categories:** edit `DEFAULT_CATEGORIES` in `app/core/db.py` (the dashboard reads them dynamically).
+* **Train a waste-specific classifier:** see [Training a Waste Classifier](#training-a-waste-classifier) above. Use Google Teachable Machine to train on your own items and switch to the `classification` backend.
+* **Add more categories:** edit `DEFAULT_CATEGORIES` in `app/core/db.py` and add matching entries to `LABEL_TO_CATEGORY` in `app/ai/labels.py`.
 * **Different DB:** point `database.url` at Postgres/MySQL — the SQLAlchemy layer handles it.
 * **Different ADC channel:** change `Pin.A0` in `app/hardware/scale.py` to `Pin.A1`, `Pin.A2`, or `Pin.A3` to read from a different ADS1115 channel.
+* **Calibrate the scale:** go to `/settings` → **Scale Calibration** to tare and calibrate without touching the command line.
 * **Reset database via UI:** go to `/settings` and click **Reset Database** to clear all events and images (useful during testing).
+* **Manual record:** the **Record Now** button on the dashboard bypasses the stable-event detector — useful when the scale is noisy during prototyping.
 * **Diagnose scale issues:** the Live Weight card on the dashboard shows a real-time stability progress bar and the current detector state (idle / stabilizing / cooldown).

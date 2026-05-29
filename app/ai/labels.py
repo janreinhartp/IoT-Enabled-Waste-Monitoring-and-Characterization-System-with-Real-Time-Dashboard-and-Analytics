@@ -1,7 +1,15 @@
-"""Mapping from object-detection labels (e.g. COCO) to waste categories.
+"""Mapping from object-detection / classification labels to waste categories.
 
-Supported categories: ``plastic``, ``paper``, ``metal``, ``glass``.
-Labels that do not map to one of these four return ``None`` and are
+Supported categories: ``plastic``, ``paper``, ``metal``, ``glass``, ``organic``.
+
+Used by two backends:
+* **tflite** (EfficientDet-Lite0 COCO detection) – labels are COCO object names
+  such as ``"bottle"`` or ``"can"`` that get mapped here.
+* **classification** (Google Teachable Machine or any image classifier) – label
+  the model's classes directly as ``"plastic"``, ``"paper"``, ``"metal"``,
+  ``"glass"``, or ``"organic"`` and they are mapped automatically.
+
+Labels that do not map to a supported category return ``None`` and are
 ignored by the pipeline.
 """
 
@@ -11,6 +19,14 @@ from typing import Dict, List, Optional
 
 # Detection-label (lowercase) -> waste category slug
 LABEL_TO_CATEGORY: Dict[str, str] = {
+    # ── Direct category slug matches (classification models) ─────────────────
+    "plastic": "plastic",
+    "paper": "paper",
+    "metal": "metal",
+    "glass": "glass",
+    "organic": "organic",
+    "cardboard": "paper",   # TrashNet / Teachable Machine common class name
+
     # ── Plastic ──────────────────────────────────────────────────────────────
     "bottle": "plastic",
     "cup": "plastic",
@@ -30,7 +46,6 @@ LABEL_TO_CATEGORY: Dict[str, str] = {
     "book": "paper",
     "newspaper": "paper",
     "magazine": "paper",
-    "cardboard": "paper",
     "box": "paper",
 
     # ── Metal ────────────────────────────────────────────────────────────────

@@ -173,6 +173,98 @@ class TFLiteDetector:
 
 
 # ---------------------------------------------------------------------------
+# TFLite image-classification backend (Google Teachable Machine / MobileNet)
+# ---------------------------------------------------------------------------
+
+
+class TFLiteClassifier:
+    """Run a TensorFlow Lite image-classification model.
+
+    Works with Google Teachable Machine TFLite exports and any other
+    single-label image-classification model.
+
+    Expected model format:
+    - Input:  [1, H, W, 3]  uint8 *or* float32
+    - Output: [1, num_classes] *or* [num_classes]  float32 probabilities
+
+    The top-1 prediction is returned as a single :class:`Detection` when
+    confidence >= ``min_confidence`` *and* the label maps to a known waste
+    category via :func:`~app.ai.labels.category_for`.
+
+    For Teachable Machine models, name your classes exactly as the category
+    slugs (e.g. ``plastic``, ``paper``, ``metal``, ``glass``, ``organic``)
+    and they will be recognised automatically.
+    """
+
+    def __init__(
+        self,
+        *,
+        model_path: str,
+        labels_path: str,
+        input_size: int = 224,
+        min_confidence: float = 0.4,
+    ):
+        if not os.path.isfile(model_path):
+            raise FileNotFoundError(f"Model not found: {model_path}")
+        if not os.path.isfile(labels_path):
+            raise FileNotFoundError(f"Labels not found: {labels_path}")
+
+        try:
+            from tflite_runtime.interpreter import Interpreter  # type: ignore
+        except ImportError:  # pragma: no cover
+            try:
+                from ai_edge_litert.interpreter import Interpreter  # type: ignore
+            except ImportError:
+                from tensorflow.lite.python.interpreter import Interpreter  # type: ignore
+
+        self._interpreter = Interpreter(model_path=model_path)
+        self._interpreter.allocate_tensors()
+        self._input_details = self._interpreter.get_input_details()
+        self._output_details = self._interpreter.get_output_details()
+        self._labels: List[str] = load_labels(labels_path)
+        self._input_size = input_size
+        self._min_confidence = min_confidence
+        self._input_dtype = self._input_details[0]["dtype"]
+
+    def detect_all(self, frame: np.ndarray) -> List[Detection]:
+        import cv2  # noqa: WPS433
+
+        resized = cv2.resize(frame, (self._input_size, self._input_size))
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+
+        if self._input_dtype == np.uint8:
+            input_tensor = np.expand_dims(rgb, axis=0).astype(np.uint8)
+        else:
+            # float32 — normalise to [0, 1] (standard for Teachable Machine)
+            input_tensor = np.expand_dims(rgb.astype(np.float32) / 255.0, axis=0)
+
+        self._interpreter.set_tensor(self._input_details[0]["index"], input_tensor)
+        self._interpreter.invoke()
+
+        probs = np.squeeze(
+            self._interpreter.get_tensor(self._output_details[0]["index"])
+        )
+        top_idx = int(np.argmax(probs))
+        confidence = float(probs[top_idx])
+
+        if confidence < self._min_confidence:
+            log.debug("Top prediction confidence %.2f below threshold %.2f", confidence, self._min_confidence)
+            return []
+
+        label = (
+            self._labels[top_idx]
+            if 0 <= top_idx < len(self._labels)
+            else f"class_{top_idx}"
+        )
+        cat = category_for(label)
+        if cat is None:
+            log.debug("Classified as '%s' (%.2f) — no waste category mapping, skipped", label, confidence)
+            return []
+
+        return [Detection(label=label, category=cat, confidence=confidence)]
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -185,6 +277,14 @@ def build_detector(cfg: AppConfig) -> Detector:
     if backend == "tflite":
         log.info("Using TFLiteDetector model=%s", cfg.ai.model_path)
         return TFLiteDetector(
+            model_path=cfg.ai.model_path,
+            labels_path=cfg.ai.labels_path,
+            input_size=cfg.ai.input_size,
+            min_confidence=cfg.ai.min_confidence,
+        )
+    if backend == "classification":
+        log.info("Using TFLiteClassifier model=%s", cfg.ai.model_path)
+        return TFLiteClassifier(
             model_path=cfg.ai.model_path,
             labels_path=cfg.ai.labels_path,
             input_size=cfg.ai.input_size,
