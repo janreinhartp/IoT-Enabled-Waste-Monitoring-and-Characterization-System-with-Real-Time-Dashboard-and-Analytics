@@ -109,6 +109,47 @@ def _merge(dc_cls, data: Dict[str, Any]):
     return dc_cls(**kwargs)
 
 
+def save_scale_calibration(
+    tare_offset: float,
+    calibration_factor: float,
+    config_path: str | os.PathLike = "config.yaml",
+) -> None:
+    """Update tare_offset and calibration_factor in-place in config.yaml.
+
+    Uses regex substitution so that all other settings and comments are
+    preserved exactly as written.
+    """
+    import re
+
+    p = Path(config_path)
+    if p.is_file():
+        text = p.read_text(encoding="utf-8")
+        text = re.sub(
+            r"^(\s+tare_offset:\s*).*$",
+            lambda m: f"{m.group(1)}{tare_offset}",
+            text,
+            flags=re.MULTILINE,
+        )
+        text = re.sub(
+            r"^(\s+calibration_factor:\s*).*$",
+            lambda m: f"{m.group(1)}{calibration_factor}",
+            text,
+            flags=re.MULTILINE,
+        )
+        p.write_text(text, encoding="utf-8")
+    else:
+        data: Dict[str, Any] = {
+            "hardware": {
+                "scale": {
+                    "tare_offset": tare_offset,
+                    "calibration_factor": calibration_factor,
+                }
+            }
+        }
+        with p.open("w", encoding="utf-8") as fp:
+            yaml.dump(data, fp, default_flow_style=False, allow_unicode=True)
+
+
 def load_config(path: str | os.PathLike | None = None) -> AppConfig:
     """Load configuration from YAML file.
 

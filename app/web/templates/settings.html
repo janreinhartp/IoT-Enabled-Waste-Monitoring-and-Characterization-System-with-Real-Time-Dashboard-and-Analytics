@@ -16,10 +16,52 @@
   <button id="reset-btn" class="btn btn-danger">Reset Database</button>
   <span id="reset-status" class="reset-status"></span>
 </div>
+
+<div class="card settings-section">
+  <h3>Scale Calibration</h3>
+  {% if use_mock %}
+  <p class="settings-desc warn">
+    ⚠️ Scale calibration requires real hardware. Set <code>hardware.use_mock: false</code> in
+    <code>config.yaml</code> and restart.
+  </p>
+  {% else %}
+  <p class="settings-desc">
+    Current values &mdash;
+    Tare offset: <strong id="cur-tare">{{ "%.6f"|format(tare_offset) }} V</strong> &nbsp;|&nbsp;
+    Calibration factor: <strong id="cur-factor">{{ "%.8f"|format(calibration_factor) }} V/g</strong>
+  </p>
+
+  <div class="calib-steps">
+    <!-- Step 1 -->
+    <div class="calib-step" id="step1">
+      <span class="step-badge">1</span>
+      <div class="step-body">
+        <p>Remove <strong>all weight</strong> from the scale, then click <em>Tare</em>.</p>
+        <button id="tare-btn" class="btn btn-secondary">Tare Scale</button>
+        <span id="tare-status" class="reset-status"></span>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="calib-step" id="step2">
+      <span class="step-badge">2</span>
+      <div class="step-body">
+        <p>Place a <strong>known weight</strong> on the scale.</p>
+        <label for="known-weight">Known weight (grams):</label>
+        <input id="known-weight" type="number" min="1" step="any" placeholder="e.g. 500"
+               class="calib-input" />
+        <button id="calib-btn" class="btn btn-primary" disabled>Calibrate &amp; Save</button>
+        <span id="calib-status" class="reset-status"></span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+  /* ---- Database reset ---- */
   document.getElementById('reset-btn').addEventListener('click', function () {
     if (!confirm('Delete ALL events and images? This cannot be undone.')) return;
 
@@ -45,5 +87,75 @@
         btn.disabled = false;
       });
   });
+
+  {% if not use_mock %}
+  /* ---- Scale calibration ---- */
+  const tareBtn   = document.getElementById('tare-btn');
+  const calibBtn  = document.getElementById('calib-btn');
+  const tareStatus  = document.getElementById('tare-status');
+  const calibStatus = document.getElementById('calib-status');
+
+  tareBtn.addEventListener('click', function () {
+    tareBtn.disabled = true;
+    tareBtn.textContent = 'Reading…';
+    tareStatus.textContent = '';
+    calibStatus.textContent = '';
+
+    fetch('/api/calibrate/tare', { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        tareStatus.textContent = '✓ Tare captured (' + data.tare_voltage.toFixed(6) + ' V). Now place the known weight.';
+        tareStatus.className = 'reset-status success';
+        calibBtn.disabled = false;
+      })
+      .catch(err => {
+        tareStatus.textContent = '✗ ' + (err.message || 'Tare failed.');
+        tareStatus.className = 'reset-status error';
+      })
+      .finally(() => {
+        tareBtn.disabled = false;
+        tareBtn.textContent = 'Tare Scale';
+      });
+  });
+
+  calibBtn.addEventListener('click', function () {
+    const w = parseFloat(document.getElementById('known-weight').value);
+    if (!w || w <= 0) {
+      calibStatus.textContent = '✗ Enter a valid weight in grams.';
+      calibStatus.className = 'reset-status error';
+      return;
+    }
+
+    calibBtn.disabled = true;
+    calibBtn.textContent = 'Calibrating…';
+    calibStatus.textContent = '';
+
+    fetch('/api/calibrate/finish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ known_weight: w }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        document.getElementById('cur-tare').textContent   = data.tare_offset.toFixed(6)    + ' V';
+        document.getElementById('cur-factor').textContent = data.calibration_factor.toFixed(8) + ' V/g';
+        const check = data.verification_grams.toFixed(1);
+        calibStatus.textContent =
+          '✓ Saved! Verification: ' + check + ' g (expected ' + w + ' g). Restarting server…';
+        calibStatus.className = 'reset-status success';
+        calibBtn.disabled = true;
+        // Reload after the server restarts (allow ~4 s)
+        setTimeout(() => location.reload(), 4500);
+      })
+      .catch(err => {
+        calibStatus.textContent = '✗ ' + (err.message || 'Calibration failed.');
+        calibStatus.className = 'reset-status error';
+        calibBtn.disabled = false;
+        calibBtn.textContent = 'Calibrate & Save';
+      });
+  });
+  {% endif %}
 </script>
 {% endblock %}

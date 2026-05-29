@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         camera = build_camera(cfg)
         detector = build_detector(cfg)
 
-    app, socketio = create_app(cfg, db, camera=camera, camera_lock=camera_lock)
+    app, socketio = create_app(cfg, db, camera=camera, camera_lock=camera_lock, scale=scale if not args.no_pipeline else None)
 
     if not args.no_pipeline:
         pipeline = Pipeline(

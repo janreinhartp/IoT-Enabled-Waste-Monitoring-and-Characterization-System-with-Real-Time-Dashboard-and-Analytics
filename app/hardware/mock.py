@@ -55,6 +55,10 @@ class MockScale:
             noise = random.uniform(-0.15, 0.15)
             return max(0.0, self._weight + noise)
 
+    def read_raw_average(self, samples: int = 8) -> float:
+        """Mock raw voltage – always returns 0.0 (calibration needs real hardware)."""
+        return 0.0
+
     def tare(self, samples: int = 16) -> None:
         with self._lock:
             self._weight = 0.0

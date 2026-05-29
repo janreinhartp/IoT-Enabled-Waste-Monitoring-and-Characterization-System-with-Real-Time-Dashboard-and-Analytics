@@ -4,36 +4,142 @@ An IoT system that **weighs** an item placed on a load-cell scale, **identifies*
 
 ## Hardware
 
-| Component | Notes |
-|---|---|
-| Raspberry Pi (3/4/5) | Runs the whole stack. |
-| ADS1115 16-bit ADC | Connected over I²C (SDA/SCL). Reads the sensor voltage on **channel 0 (AIN0)**. |
-| Analogue weight sensor / load-cell amplifier | Voltage output wired to AIN0. Must output 0–5 V. |
-| BSS138 bidirectional I²C level shifter | Translates 3.3 V Pi I²C ↔ 5 V ADS1115 logic. |
-| USB camera | Plugged into any USB port. |
+| Component | Qty | Notes |
+|---|---|---|
+| Raspberry Pi (3/4/5) | 1 | Runs the whole stack. Connected to the router via Ethernet. |
+| Load cells | 4 | Wired to the junction box to form a single Wheatstone bridge. |
+| Load cell junction box | 1 | Combines the 4 load cells into E+/E−/S+/S− outputs. |
+| External load cell monitor / signal conditioner | 1 | Powered by 12 V; outputs 0–5 V analog (AO + GND) to the ADS1115. |
+| ADS1115 16-bit ADC | 1 | Powered at 5 V (from buck converter). Reads the 0–5 V signal on **AIN0**. I²C address 0x48 (ADDR → GND). |
+| BSS138 bidirectional I²C level shifter | 1 | Translates 3.3 V Pi I²C ↔ 5 V ADS1115 logic. |
+| Buck converter (12 V → 5 V) | 1 | Steps down the 12 V supply to 5 V for the Pi and ADS1115. |
+| 12 V DC power supply (≥ 3 A) | 1 | Powers the load cell monitor directly, and the buck converter. |
+| USB camera | 1 | Plugged into any Pi USB port. |
+| Router | 1 | Pi connects via Ethernet for network access. |
 
 Enable I²C on the Pi — see [step 1a below](#1a--enable-i2c).
 
 ## Wiring
 
-The ADS1115 is powered at **5 V** so it can safely read the full 0–5 V sensor range (PGA set to ±6.144 V). A bidirectional level shifter on the I²C lines protects the Pi's 3.3 V GPIO.
+```mermaid
+graph TD
+    subgraph CELLS["Load Cells ×4"]
+        LC1["Load Cell 1"]
+        LC2["Load Cell 2"]
+        LC3["Load Cell 3"]
+        LC4["Load Cell 4"]
+    end
 
+    LC1 & LC2 & LC3 & LC4 -->|"Red → E+  /  Black → E−  /  White → S+  /  Green → S−"| JB
+
+    JB["Junction Box"] -->|"EXC+  ·  EXC−  ·  SIG+  ·  SIG−"| MON
+
+    PSU["12V DC Power Supply"] -->|"+12V  ·  GND"| MON["Load Cell Monitor"]
+    PSU          -->|"+12V  ·  GND"| BUCK["Buck Converter  12V → 5V"]
+
+    BUCK -->|"5V  ·  GND"| ADS
+    BUCK -->|"5V via USB-C  ·  GND via Pin 6"| PI
+
+    MON  -->|"AO 0–5V → AIN0  ·  GND → GND"| ADS["ADS1115 ADC\n(ADDR → GND  ·  addr 0x48)"]
+
+    ADS  -->|"SDA → HV1  ·  SCL → HV2  ·  VDD → HV  ·  GND → GND"| LS["BSS138 Level Shifter\n5V side ↔ 3.3V side"]
+
+    LS   -->|"LV1 → Pin 3 SDA  ·  LV2 → Pin 5 SCL  ·  LV → Pin 1 3V3  ·  GND → Pin 6"| PI["Raspberry Pi"]
+
+    PI   -->|"RJ-45 Ethernet"| RT["Router / LAN"]
 ```
-Raspberry Pi              Level Shifter (BSS138)       ADS1115
-────────────────          ──────────────────────       ───────────────────
-3.3V  (Pin 1)  ─────────► LV (3.3V ref)
-5V    (Pin 2)  ─────────► HV (5V ref)  ────────────► VDD
-GND   (Pin 6)  ─────────► GND ──────────────────────► GND
-                                                       ADDR ──► GND  (addr 0x48)
 
-SDA   (Pin 3)  ─────────► LV1 ◄──────► HV1 ─────────► SDA
-SCL   (Pin 5)  ─────────► LV2 ◄──────► HV2 ─────────► SCL
+> **Common ground:** Buck Converter VOUT−, ADS1115 GND, Level Shifter GND, Load Cell Monitor GND, and Pi Pin 6 must all share a single GND rail.
 
-                                         Sensor output ──► AIN0  (channel 0)
-                                         Sensor GND    ──► GND
-```
+> **ADDR pin** on the ADS1115 tied to GND sets the I²C address to **0x48**. Verify with `i2cdetect -y 1`.
 
-> **Note:** Do **not** connect the ADS1115 VDD directly to the Pi's 3.3 V pin when reading 5 V signals — the analog input must not exceed VDD + 0.3 V.
+> **Buck converter** output must be trimmed to exactly **5.0 V** before connecting any load.
+
+---
+
+### Pin Reference Tables
+
+#### Load Cells → Junction Box (all 4 cells identical)
+
+| Wire colour | Junction Box terminal |
+|---|---|
+| Red | E+ |
+| Black | E− |
+| White | S+ |
+| Green | S− |
+
+#### Junction Box → Load Cell Monitor
+
+| Junction Box | Load Cell Monitor |
+|---|---|
+| E+ | EXC+ |
+| E− | EXC− |
+| S+ | SIG+ |
+| S− | SIG− |
+
+#### 12V PSU → Load Cell Monitor & Buck Converter
+
+| PSU | Load Cell Monitor | Buck Converter |
+|---|---|---|
+| +12V | VCC | VIN+ |
+| GND | GND | VIN− |
+
+#### Buck Converter (5V out) → Pi & ADS1115
+
+| Buck Out | Destination |
+|---|---|
+| 5V | Pi USB-C (preferred) or GPIO Pin 2 / Pin 4 |
+| GND | Pi GPIO Pin 6 |
+| 5V | ADS1115 VDD |
+| GND | ADS1115 GND |
+
+#### Load Cell Monitor → ADS1115
+
+| Monitor | ADS1115 |
+|---|---|
+| AO (0–5V) | AIN0 |
+| GND / AGND | GND |
+
+#### ADS1115 → Level Shifter (5V side)
+
+| ADS1115 | Level Shifter |
+|---|---|
+| SDA | HV1 |
+| SCL | HV2 |
+| VDD (5V) | HV |
+| GND | GND |
+| ADDR | GND → sets address 0x48 |
+
+#### Level Shifter (3.3V side) → Raspberry Pi
+
+| Level Shifter | Pi Pin | Function |
+|---|---|---|
+| LV1 | Pin 3 | SDA1 (GPIO 2) |
+| LV2 | Pin 5 | SCL1 (GPIO 3) |
+| LV | Pin 1 | 3.3V reference |
+| GND | Pin 6 | GND |
+
+#### Raspberry Pi → Router
+
+| Pi port | Cable | Router |
+|---|---|---|
+| RJ-45 Ethernet | Cat 5e / Cat 6 | Any LAN port |
+
+---
+
+### Power Budget
+
+| Component | Rail | Typical draw |
+|---|---|---|
+| Raspberry Pi 4 | 5V (buck) | 600 mA idle · 1.2 A load |
+| ADS1115 | 5V (buck) | < 1 mA |
+| BSS138 level shifter | 3.3V / 5V | < 1 mA |
+| Load cell monitor | 12V (PSU) | ~100–200 mA |
+| USB camera | Pi USB 5V | 200–500 mA |
+| **5V rail total** | **Buck** | **≈ 2 A peak** |
+
+A **12V / 3A** (36 W) PSU with a buck converter rated ≥ 3 A is sufficient.
+
 
 ## Architecture
 

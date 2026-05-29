@@ -18,6 +18,7 @@ def create_app(
     *,
     camera=None,
     camera_lock: Optional[threading.Lock] = None,
+    scale=None,
     async_mode: Optional[str] = None,
 ) -> Tuple[Flask, SocketIO]:
     """Build the Flask app and SocketIO server.
@@ -35,11 +36,12 @@ def create_app(
     app.config["WASTE_DB"] = db
     app.config["WASTE_CAMERA"] = camera
     app.config["WASTE_CAMERA_LOCK"] = camera_lock or threading.Lock()
+    app.config["WASTE_SCALE"] = scale
 
     socketio = SocketIO(app, async_mode=async_mode)
 
     # Register routes (import here to avoid circular imports)
     from . import routes  # noqa: WPS433
 
-    routes.register(app, socketio, cfg, db, camera=camera, camera_lock=app.config["WASTE_CAMERA_LOCK"])
+    routes.register(app, socketio, cfg, db, camera=camera, camera_lock=app.config["WASTE_CAMERA_LOCK"], scale=scale)
     return app, socketio

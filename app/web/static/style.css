@@ -38,7 +38,16 @@ canvas { max-width: 100%; }
 .btn { display: inline-block; padding: 0.5rem 1.25rem; border: none; border-radius: 0.5rem; font-size: 0.95rem; cursor: pointer; font-weight: 600; margin-top: 0.75rem; }
 .btn-danger { background: #dc2626; color: #fff; }
 .btn-danger:hover:not(:disabled) { background: #b91c1c; }
+.btn-secondary { background: #e5e7eb; color: #374151; }
+.btn-secondary:hover:not(:disabled) { background: #d1d5db; }
+.btn-primary { background: #047857; color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #065f46; }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .reset-status { margin-left: 1rem; font-size: 0.9rem; }
 .reset-status.success { color: #047857; }
 .reset-status.error { color: #dc2626; }
+.calib-steps { display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; }
+.calib-step { display: flex; align-items: flex-start; gap: 1rem; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; }
+.step-badge { flex-shrink: 0; width: 2rem; height: 2rem; background: #047857; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1rem; }
+.step-body p { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.calib-input { padding: 0.4rem 0.6rem; border: 1px solid #d1d5db; border-radius: 0.4rem; font-size: 0.95rem; width: 10rem; margin-right: 0.5rem; }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import sys
 import threading
 import time
 from datetime import datetime, timedelta
@@ -42,12 +43,15 @@ def register(
     *,
     camera=None,
     camera_lock: Optional[threading.Lock] = None,
+    scale=None,
 ) -> None:
     """Register all HTTP routes and Socket.IO handlers."""
 
     # Module-level state so broadcast_bin_status can update it and on_connect
     # can send the current value to freshly connected clients.
     _bin_state: dict = {"full": False}
+    # Temporary tare voltage captured during step 1 of calibration.
+    _calib_state: dict = {"tare_voltage": None}
 
     # ---- Pages ----
 
@@ -69,7 +73,13 @@ def register(
         from app.core.db import WasteEvent  # local import
         with db.session() as s:
             event_count = s.query(WasteEvent).count()
-        return render_template("settings.html", event_count=event_count)
+        return render_template(
+            "settings.html",
+            event_count=event_count,
+            use_mock=cfg.hardware.use_mock,
+            tare_offset=cfg.hardware.scale.tare_offset,
+            calibration_factor=cfg.hardware.scale.calibration_factor,
+        )
 
     # ---- JSON API ----
 
@@ -117,6 +127,85 @@ def register(
     def api_reset_db():
         deleted = db.reset_events()
         return jsonify({"deleted": deleted, "status": "ok"})
+
+    # ---- Scale calibration ----
+
+    @app.get("/api/calibrate/status")
+    def api_calibrate_status():
+        return jsonify({
+            "use_mock": cfg.hardware.use_mock,
+            "tare_offset": cfg.hardware.scale.tare_offset,
+            "calibration_factor": cfg.hardware.scale.calibration_factor,
+            "tare_captured": _calib_state["tare_voltage"] is not None,
+        })
+
+    @app.post("/api/calibrate/tare")
+    def api_calibrate_tare():
+        if cfg.hardware.use_mock:
+            return jsonify({"error": "Calibration requires real hardware (hardware.use_mock is true)."}), 400
+        if scale is None:
+            return jsonify({"error": "Scale not available (running with --no-pipeline)."}), 400
+        try:
+            tare_voltage = scale.read_raw_average(32)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"Scale read failed: {exc}"}), 500
+        _calib_state["tare_voltage"] = tare_voltage
+        return jsonify({"tare_voltage": tare_voltage, "status": "tare_captured"})
+
+    @app.post("/api/calibrate/finish")
+    def api_calibrate_finish():
+        if cfg.hardware.use_mock:
+            return jsonify({"error": "Calibration requires real hardware (hardware.use_mock is true)."}), 400
+        if scale is None:
+            return jsonify({"error": "Scale not available (running with --no-pipeline)."}), 400
+        if _calib_state["tare_voltage"] is None:
+            return jsonify({"error": "Run tare first."}), 400
+
+        data = request.get_json(silent=True) or {}
+        try:
+            known_weight = float(data["known_weight"])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"error": "known_weight (grams) is required."}), 400
+        if known_weight <= 0:
+            return jsonify({"error": "known_weight must be positive."}), 400
+
+        try:
+            loaded_voltage = scale.read_raw_average(32)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"Scale read failed: {exc}"}), 500
+
+        tare_voltage = _calib_state["tare_voltage"]
+        delta = loaded_voltage - tare_voltage
+        if abs(delta) < 1e-6:
+            return jsonify({"error": "No change detected from tare. Check wiring."}), 400
+
+        factor = delta / known_weight
+        # Persist to config.yaml and update live config object.
+        from app.config import save_scale_calibration
+        config_path = os.environ.get("WASTE_CONFIG", "config.yaml")
+        save_scale_calibration(tare_voltage, factor, config_path)
+        cfg.hardware.scale.tare_offset = tare_voltage
+        cfg.hardware.scale.calibration_factor = factor
+        # Update the live scale object so it starts using new values immediately.
+        if hasattr(scale, "_tare_offset"):
+            scale._tare_offset = tare_voltage
+        if hasattr(scale, "_calibration_factor"):
+            scale._calibration_factor = factor
+        _calib_state["tare_voltage"] = None
+
+        # Schedule restart so the saved config is re-loaded cleanly.
+        def _delayed_restart():
+            time.sleep(2.0)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        threading.Thread(target=_delayed_restart, daemon=True).start()
+
+        return jsonify({
+            "tare_offset": tare_voltage,
+            "calibration_factor": factor,
+            "verification_grams": delta / factor,
+            "status": "saved_restarting",
+        })
 
     @app.get("/api/events.csv")
     def api_events_csv():
