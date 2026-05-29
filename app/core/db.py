@@ -125,11 +125,22 @@ class Database:
         return count
 
     def _seed_categories(self) -> None:
+        valid_slugs = {slug for _, slug, _ in DEFAULT_CATEGORIES}
         with self.session() as s:
-            existing = {c.slug for c in s.scalars(select(Category)).all()}
+            existing = {c.slug: c for c in s.scalars(select(Category)).all()}
+            # Add missing categories
             for name, slug, color in DEFAULT_CATEGORIES:
                 if slug not in existing:
                     s.add(Category(slug=slug, name=name, color=color))
+            # Remove stale categories that are no longer in DEFAULT_CATEGORIES
+            # (only safe to remove if no events reference them)
+            for slug, cat in existing.items():
+                if slug not in valid_slugs:
+                    in_use = s.execute(
+                        select(func.count()).where(WasteEvent.category_slug == slug)
+                    ).scalar_one()
+                    if in_use == 0:
+                        s.delete(cat)
             s.commit()
 
     @contextmanager
