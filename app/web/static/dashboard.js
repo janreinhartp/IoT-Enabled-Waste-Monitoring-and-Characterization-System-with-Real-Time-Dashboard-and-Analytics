@@ -205,4 +205,22 @@
   if (btnScan) {
     btnScan.addEventListener("click", () => runScan(false));
   }
+
+  // ---- Live AI preview via Socket.IO (pushed every ai_preview_interval_s) ----
+  const aiLiveDot = document.getElementById("ai-live-dot");
+  const aiLastUpdated = document.getElementById("ai-last-updated");
+
+  socket.on("ai_preview", (msg) => {
+    showDetections(msg.detections, null);
+    // Pulse the live indicator
+    if (aiLiveDot) {
+      aiLiveDot.classList.remove("ai-dot-pulse");
+      void aiLiveDot.offsetWidth; // force reflow to restart animation
+      aiLiveDot.classList.add("ai-dot-pulse");
+    }
+    if (aiLastUpdated) {
+      const now = new Date();
+      aiLastUpdated.textContent = now.toLocaleTimeString();
+    }
+  });
 })();

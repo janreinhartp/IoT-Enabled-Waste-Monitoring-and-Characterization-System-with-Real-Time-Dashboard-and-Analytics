@@ -158,29 +158,29 @@ A single Python process runs:
 1. A background thread sampling the ADS1115 channel 1 voltage at ~10 Hz.
 2. A stable-event detector that fires only when the derived weight is above a threshold **and** stable for a configurable window (ignores oscillation and adjustments).
 3. On each event: capture a USB-camera frame → run a TFLite model (object detector **or** image classifier) → map the label to a waste category → save the image → insert a row in SQLite → push a Socket.IO message.
-4. A Flask + Flask-SocketIO web server with a live dashboard and analytics page.
+4. A second background thread running the AI continuously (every 2 s by default), pushing live detection results to the dashboard via Socket.IO — without saving anything. This powers the **"AI sees:"** live panel so you can always see what the camera is detecting.
+5. A Flask + Flask-SocketIO web server with a live dashboard and analytics page.
 
 ## How an Item is Recorded
 
-When something is placed on the scale the system goes through the following steps:
+Two parallel loops run continuously once the system starts:
 
 ```
-Scale polling (~10 Hz)
-    │
-    ▼
-StableEventDetector.push(grams)
-    │  Collects a rolling window of samples.
-    │  Fires only when:
-    │    • weight ≥ min_weight_g (default 5 g)
-    │    • stddev of last N samples ≤ stability_g (default 1 g)
-    ▼
-Pipeline._handle_event(weight_g)   ← also triggered manually by „Record Now“ button
-    │
-    ├─ camera.capture()           → grabs one frame from the USB camera
-    ├─ detector.detect_all(frame) → TFLite model identifies the item
-    │                               (object-detection or image-classification backend)
-    │                               returns list of Detection(label, category, confidence)
-    ├─ save_jpeg(frame, path)     → saves image to data/images/<uuid>.jpg
+Scale polling (~10 Hz)              AI preview loop (every 2 s)
+    │                                       │
+    ▼                                       ▼
+StableEventDetector.push(grams)     camera.capture()
+    │  Fires when:                          │
+    │    • weight ≥ min_weight_g            ▼
+    │    • stddev of last N ≤ stability_g  detector.preview_all(frame)
+    ▼                                       │  All detections ≥ 10% confidence,
+Pipeline._handle_event(weight_g)            │  including unmapped labels
+    │  ← also triggered by                 ▼
+    │    "Record Now" button       broadcast_ai_preview()
+    │                                       │
+    ├─ camera.capture()                     ▼
+    ├─ detector.detect_all(frame)   Socket.IO → Browser
+    ├─ save_jpeg(frame, path)       "AI sees:" panel updates live
     │
     └─ for each detection:
            db.insert_event(...)   → writes one row to the waste_events SQLite table
@@ -192,11 +192,11 @@ Pipeline._handle_event(weight_g)   ← also triggered manually by „Record Now�
 | Rule | Detail |
 |---|---|
 | Event skipped if nothing detected | If the AI finds no recognisable object in the frame the event is not saved. |
-| Manual record button | The **Record Now** button on the Live Weight card bypasses the stability check and records immediately at the current weight — useful when the scale is noisy. |
+| Manual record button | The **Record Now** button scans first, shows what was detected, then saves — useful when the scale is noisy. |
+| Live "AI sees:" panel | Updates automatically every 2 s via Socket.IO. Shows all model predictions including low-confidence and unmapped labels. Interval controlled by `ai.ai_preview_interval_s` (set to `0` to disable). |
 | Weight split equally | If multiple objects are detected in one frame the total weight is divided equally between them. |
 | Reset required between events | After an event fires the weight must drop below `reset_threshold_g` (default 2 g) before the next event is accepted. |
 | Bin capacity check | If the total weight reaches `events.capacity_kg` the pipeline pauses and the dashboard shows a "bin full" warning until the bin is emptied. |
-
 ---
 
 ## Project Layout

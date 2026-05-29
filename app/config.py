@@ -54,6 +54,9 @@ class AIConfig:
     labels_path: str = "app/ai/models/coco_labels.txt"
     min_confidence: float = 0.4
     input_size: int = 320
+    # How often (seconds) to run a background AI preview and push via Socket.IO.
+    # Set to 0 to disable continuous preview.
+    ai_preview_interval_s: float = 2.0
 
 
 @dataclass

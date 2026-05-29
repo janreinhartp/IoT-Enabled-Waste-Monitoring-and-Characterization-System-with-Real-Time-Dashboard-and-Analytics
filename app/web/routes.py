@@ -357,3 +357,12 @@ def broadcast_bin_status(app: Flask, socketio: SocketIO, is_full: bool) -> None:
 def broadcast_scale_status(socketio: SocketIO, status: dict) -> None:
     """Push scale detector state to all connected clients."""
     socketio.emit("scale_status", status)
+
+
+def broadcast_ai_preview(socketio: SocketIO, detections: list) -> None:
+    """Push a live AI preview update to all connected clients.
+
+    ``detections`` is a list of dicts with keys ``label``, ``confidence``,
+    and ``category`` (``None`` when the label is not mapped to a category).
+    """
+    socketio.emit("ai_preview", {"detections": detections})

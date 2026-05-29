@@ -25,6 +25,7 @@ EventCallback = Callable[[WasteEventRecord], None]
 WeightCallback = Callable[[float], None]
 BinStatusCallback = Callable[[bool], None]
 ScaleStatusCallback = Callable[[dict], None]
+AIPreviewCallback = Callable[[list], None]
 
 
 class Pipeline:
@@ -54,6 +55,7 @@ class Pipeline:
         on_weight: Optional[WeightCallback] = None,
         on_bin_status: Optional[BinStatusCallback] = None,
         on_scale_status: Optional[ScaleStatusCallback] = None,
+        on_ai_preview: Optional[AIPreviewCallback] = None,
     ):
         self._cfg = cfg
         self._scale = scale
@@ -65,6 +67,7 @@ class Pipeline:
         self._on_weight = on_weight
         self._on_bin_status = on_bin_status
         self._on_scale_status = on_scale_status
+        self._on_ai_preview = on_ai_preview
         self._detector_state = StableEventDetector(
             min_weight_g=cfg.events.min_weight_g,
             stability_window=cfg.events.stability_window,
@@ -72,6 +75,7 @@ class Pipeline:
             reset_threshold_g=cfg.events.reset_threshold_g,
         )
         self._thread: Optional[threading.Thread] = None
+        self._preview_thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._latest_weight = 0.0
         self._bin_full = False
@@ -89,12 +93,23 @@ class Pipeline:
             target=self._run, name="waste-pipeline", daemon=True
         )
         self._thread.start()
+        # Start continuous AI preview thread if a callback is registered and
+        # the interval is configured.
+        interval = self._cfg.ai.ai_preview_interval_s
+        if self._on_ai_preview and interval and interval > 0:
+            self._preview_thread = threading.Thread(
+                target=self._ai_preview_loop, name="waste-ai-preview", daemon=True
+            )
+            self._preview_thread.start()
+            log.info("AI preview thread started (interval=%.1fs)", interval)
         log.info("Pipeline started")
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=timeout)
+        if self._preview_thread:
+            self._preview_thread.join(timeout=timeout)
         log.info("Pipeline stopped")
 
     @property
@@ -144,6 +159,29 @@ class Pipeline:
             {"label": d.label, "confidence": d.confidence, "category": d.category}
             for d in self._safe_detect_all(frame)
         ]
+
+    # ------------------------------------------------------------------
+    # Continuous AI preview loop
+    # ------------------------------------------------------------------
+
+    def _ai_preview_loop(self) -> None:
+        """Background thread: runs preview_all() periodically and calls on_ai_preview.
+
+        Runs at ``cfg.ai.ai_preview_interval_s`` second intervals. Skipped when
+        the main pipeline thread is busy with an event (camera lock held). Uses
+        a low-priority sleep so it does not compete with the scale loop.
+        """
+        interval = self._cfg.ai.ai_preview_interval_s
+        while not self._stop.is_set():
+            self._stop.wait(interval)
+            if self._stop.is_set():
+                break
+            try:
+                detections = self.detect_preview()
+                if self._on_ai_preview:
+                    self._on_ai_preview(detections)
+            except Exception:  # noqa: BLE001
+                log.exception("AI preview loop error")
 
     # ------------------------------------------------------------------
     # Main loop

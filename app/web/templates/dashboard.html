@@ -19,7 +19,14 @@
     </button>
     <div id="record-feedback" class="record-feedback"></div>
     <div id="detection-preview" class="detection-preview" style="display:none">
-      <div class="detection-preview-title">AI sees:</div>
+      <div class="detection-preview-header">
+        <span class="detection-preview-title">AI sees:</span>
+        <span class="ai-live-badge">
+          <span id="ai-live-dot" class="ai-live-dot"></span>
+          <span class="ai-live-label">LIVE</span>
+          <span id="ai-last-updated" class="ai-last-updated"></span>
+        </span>
+      </div>
       <div id="detection-preview-body"></div>
     </div>
   </div>

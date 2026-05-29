@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     db.create_all()
 
     # Build Flask + SocketIO
-    from app.web.routes import broadcast_event, broadcast_weight, broadcast_bin_status, broadcast_scale_status
+    from app.web.routes import broadcast_event, broadcast_weight, broadcast_bin_status, broadcast_scale_status, broadcast_ai_preview
     from app.web.server import create_app
     import threading
 
@@ -71,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             on_weight=lambda g: broadcast_weight(socketio, g),
             on_bin_status=lambda full: broadcast_bin_status(app, socketio, full),
             on_scale_status=lambda s: broadcast_scale_status(socketio, s),
+            on_ai_preview=lambda dets: broadcast_ai_preview(socketio, dets),
         )
         pipeline.start()
         app.config["WASTE_PIPELINE"] = pipeline
