@@ -118,7 +118,18 @@
 
   // ---- Manual record button ----
   const btnRecord = document.getElementById("btn-record");
+  const btnScan = document.getElementById("btn-scan");
   const recordFeedback = document.getElementById("record-feedback");
+  const detectionPreview = document.getElementById("detection-preview");
+  const detectionPreviewBody = document.getElementById("detection-preview-body");
+
+  const CATEGORY_COLORS = {
+    plastic: "#3b82f6",
+    paper:   "#f59e0b",
+    metal:   "#6b7280",
+    glass:   "#10b981",
+    organic: "#84cc16",
+  };
 
   function setFeedback(msg, ok) {
     if (!recordFeedback) return;
@@ -128,20 +139,66 @@
     recordFeedback._timer = setTimeout(() => { recordFeedback.textContent = ""; }, 4000);
   }
 
-  if (btnRecord) {
-    btnRecord.addEventListener("click", () => {
-      btnRecord.disabled = true;
-      fetch("/api/record", { method: "POST" })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.error) {
-            setFeedback("Error: " + data.error, false);
+  function showDetections(detections, weight_g) {
+    if (!detectionPreview || !detectionPreviewBody) return;
+    if (!detections || detections.length === 0) {
+      detectionPreviewBody.innerHTML =
+        '<span class="det-none">Nothing recognised — check AI backend and confidence threshold</span>';
+    } else {
+      detectionPreviewBody.innerHTML = detections.map((d) => {
+        const color = CATEGORY_COLORS[d.category] || "#9ca3af";
+        const pct = Math.round(d.confidence * 100);
+        return '<div class="det-row">' +
+          '<span class="det-label">' + escapeHtml(d.label) + '</span>' +
+          '<span class="det-arrow">\u2192</span>' +
+          '<span class="det-cat" style="color:' + color + '">' + escapeHtml(d.category) + '</span>' +
+          '<span class="det-conf">' + pct + '%</span>' +
+          '</div>';
+      }).join("");
+    }
+    detectionPreview.style.display = "block";
+  }
+
+  function runScan(andRecord) {
+    if (btnScan) btnScan.disabled = true;
+    if (btnRecord) btnRecord.disabled = true;
+    fetch("/api/detect/preview", { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) {
+          setFeedback("Error: " + data.error, false);
+          return;
+        }
+        showDetections(data.detections, data.weight_g);
+        if (andRecord) {
+          if (!data.detections || data.detections.length === 0) {
+            setFeedback("Nothing detected — not recorded.", false);
           } else {
-            setFeedback("Recording at " + data.weight_g + " g…", true);
+            // detections found — now actually record
+            fetch("/api/record", { method: "POST" })
+              .then((r) => r.json())
+              .then((rec) => {
+                if (rec.error) {
+                  setFeedback("Error: " + rec.error, false);
+                } else {
+                  setFeedback("Recording at " + rec.weight_g + " g…", true);
+                }
+              })
+              .catch(() => setFeedback("Record request failed.", false));
           }
-        })
-        .catch(() => setFeedback("Request failed.", false))
-        .finally(() => { btnRecord.disabled = false; });
-    });
+        }
+      })
+      .catch(() => setFeedback("Scan failed.", false))
+      .finally(() => {
+        if (btnScan) btnScan.disabled = false;
+        if (btnRecord) btnRecord.disabled = false;
+      });
+  }
+
+  if (btnRecord) {
+    btnRecord.addEventListener("click", () => runScan(true));
+  }
+  if (btnScan) {
+    btnScan.addEventListener("click", () => runScan(false));
   }
 })();

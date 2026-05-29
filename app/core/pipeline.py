@@ -120,6 +120,16 @@ class Pipeline:
             daemon=True,
         ).start()
 
+    def detect_preview(self) -> List[Detection]:
+        """Capture a frame and run the detector without saving anything.
+
+        Returns all detections above the configured confidence threshold,
+        or an empty list if nothing is recognised. Used by the dashboard
+        "What's here?" scan to help debug detection issues.
+        """
+        frame = self._safe_capture()
+        return self._safe_detect_all(frame)
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------

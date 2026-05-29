@@ -137,6 +137,25 @@ def register(
         pipeline.record_now()
         return jsonify({"status": "recording", "weight_g": round(pipeline.latest_weight, 1)})
 
+    @app.post("/api/detect/preview")
+    def api_detect_preview():
+        """Capture a frame and run the detector without saving.
+
+        Returns what the AI currently sees — useful for debugging why
+        Record Now is not recording anything.
+        """
+        pipeline = app.config.get("WASTE_PIPELINE")
+        if pipeline is None:
+            return jsonify({"error": "Pipeline not running."}), 400
+        detections = pipeline.detect_preview()
+        return jsonify({
+            "detections": [
+                {"label": d.label, "category": d.category, "confidence": round(d.confidence, 3)}
+                for d in detections
+            ],
+            "weight_g": round(pipeline.latest_weight, 1),
+        })
+
     # ---- Scale calibration ----
 
     @app.get("/api/calibrate/status")

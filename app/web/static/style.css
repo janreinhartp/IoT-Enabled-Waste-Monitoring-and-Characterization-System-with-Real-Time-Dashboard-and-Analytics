@@ -54,4 +54,15 @@ canvas { max-width: 100%; }
 .btn-record { display: block; width: 100%; margin-top: 1rem; padding: 0.65rem 1rem; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: 700; cursor: pointer; background: #dc2626; color: #fff; letter-spacing: 0.02em; transition: background 0.2s; }
 .btn-record:hover:not(:disabled) { background: #b91c1c; }
 .btn-record:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-scan { display: block; width: 100%; margin-top: 0.5rem; padding: 0.55rem 1rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; background: #f9fafb; color: #374151; transition: background 0.2s; }
+.btn-scan:hover:not(:disabled) { background: #e5e7eb; }
+.btn-scan:disabled { opacity: 0.55; cursor: not-allowed; }
 .record-feedback { margin-top: 0.4rem; font-size: 0.85rem; min-height: 1.2em; text-align: center; }
+.detection-preview { margin-top: 0.75rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.6rem 0.75rem; background: #f9fafb; }
+.detection-preview-title { font-size: 0.75rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
+.det-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; padding: 0.15rem 0; }
+.det-label { font-weight: 600; color: #111827; }
+.det-arrow { color: #9ca3af; }
+.det-cat { font-weight: 700; text-transform: capitalize; }
+.det-conf { margin-left: auto; font-size: 0.8rem; color: #6b7280; }
+.det-none { font-size: 0.85rem; color: #ef4444; }
