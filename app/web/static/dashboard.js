@@ -143,16 +143,20 @@
     if (!detectionPreview || !detectionPreviewBody) return;
     if (!detections || detections.length === 0) {
       detectionPreviewBody.innerHTML =
-        '<span class="det-none">Nothing recognised — check AI backend and confidence threshold</span>';
+        '<span class="det-none">Nothing recognised — check AI backend, model path, and confidence threshold</span>';
     } else {
       detectionPreviewBody.innerHTML = detections.map((d) => {
-        const color = CATEGORY_COLORS[d.category] || "#9ca3af";
+        const mapped = !!d.category;
+        const color = mapped ? (CATEGORY_COLORS[d.category] || "#9ca3af") : "#f97316";
         const pct = Math.round(d.confidence * 100);
-        return '<div class="det-row">' +
+        const catText = mapped ? d.category : "not mapped \u26a0";
+        const belowThresh = d.confidence < 0.4;
+        return '<div class="det-row' + (belowThresh ? " det-row-dim" : "") + '">' +
           '<span class="det-label">' + escapeHtml(d.label) + '</span>' +
           '<span class="det-arrow">\u2192</span>' +
-          '<span class="det-cat" style="color:' + color + '">' + escapeHtml(d.category) + '</span>' +
-          '<span class="det-conf">' + pct + '%</span>' +
+          '<span class="det-cat" style="color:' + color + '">' + escapeHtml(catText) + '</span>' +
+          '<span class="det-conf' + (belowThresh ? " det-conf-low" : "") + '">' + pct + '%' +
+          (belowThresh ? ' <small>(below threshold)</small>' : '') + '</span>' +
           '</div>';
       }).join("");
     }

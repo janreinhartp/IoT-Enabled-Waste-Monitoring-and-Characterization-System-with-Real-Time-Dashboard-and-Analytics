@@ -61,8 +61,10 @@ canvas { max-width: 100%; }
 .detection-preview { margin-top: 0.75rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.6rem 0.75rem; background: #f9fafb; }
 .detection-preview-title { font-size: 0.75rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
 .det-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; padding: 0.15rem 0; }
+.det-row-dim { opacity: 0.6; }
 .det-label { font-weight: 600; color: #111827; }
 .det-arrow { color: #9ca3af; }
 .det-cat { font-weight: 700; text-transform: capitalize; }
 .det-conf { margin-left: auto; font-size: 0.8rem; color: #6b7280; }
+.det-conf-low { color: #f97316; }
 .det-none { font-size: 0.85rem; color: #ef4444; }

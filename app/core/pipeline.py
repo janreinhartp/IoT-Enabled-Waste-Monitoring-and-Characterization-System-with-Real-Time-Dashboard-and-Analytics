@@ -120,15 +120,30 @@ class Pipeline:
             daemon=True,
         ).start()
 
-    def detect_preview(self) -> List[Detection]:
+    def detect_preview(self) -> List[dict]:
         """Capture a frame and run the detector without saving anything.
 
-        Returns all detections above the configured confidence threshold,
-        or an empty list if nothing is recognised. Used by the dashboard
-        "What's here?" scan to help debug detection issues.
+        Uses :meth:`~app.ai.detector.TFLiteDetector.preview_all` when
+        available so the result includes raw model predictions above a low
+        threshold (0.10) *and* labels that have no waste-category mapping.
+        This lets the dashboard show exactly what the AI sees — helping
+        debug why ``record_now`` might not be recording anything.
+
+        Returns a list of dicts with keys ``label``, ``confidence``, and
+        ``category`` (``None`` when the label is not mapped to a category).
         """
         frame = self._safe_capture()
-        return self._safe_detect_all(frame)
+        if frame is None:
+            return []
+        if hasattr(self._detector, "preview_all"):
+            try:
+                return self._detector.preview_all(frame)  # type: ignore[union-attr]
+            except Exception:  # noqa: BLE001
+                log.exception("preview_all failed; falling back to detect_all")
+        return [
+            {"label": d.label, "confidence": d.confidence, "category": d.category}
+            for d in self._safe_detect_all(frame)
+        ]
 
     # ------------------------------------------------------------------
     # Main loop

@@ -142,7 +142,9 @@ def register(
         """Capture a frame and run the detector without saving.
 
         Returns what the AI currently sees — useful for debugging why
-        Record Now is not recording anything.
+        Record Now is not recording anything.  Includes labels that are
+        detected but not (yet) mapped to a waste category so you know
+        exactly what the model sees.
         """
         pipeline = app.config.get("WASTE_PIPELINE")
         if pipeline is None:
@@ -150,7 +152,11 @@ def register(
         detections = pipeline.detect_preview()
         return jsonify({
             "detections": [
-                {"label": d.label, "category": d.category, "confidence": round(d.confidence, 3)}
+                {
+                    "label": d["label"],
+                    "category": d.get("category"),   # None when unmapped
+                    "confidence": round(d["confidence"], 3),
+                }
                 for d in detections
             ],
             "weight_g": round(pipeline.latest_weight, 1),

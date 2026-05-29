@@ -66,6 +66,14 @@ class MockDetector:
                 results.append(Detection(label=label, category=cat, confidence=conf))
         return results
 
+    def preview_all(self, frame: np.ndarray) -> List[dict]:
+        """Return all demo detections with no filtering — for debug scans."""
+        results: List[dict] = []
+        for label, conf in self._DEMO:
+            conf = max(0.0, min(1.0, conf + random.uniform(-0.05, 0.05)))
+            results.append({"label": label, "confidence": conf, "category": category_for(label)})
+        return results
+
 
 # ---------------------------------------------------------------------------
 # TFLite detector
@@ -110,7 +118,16 @@ class TFLiteDetector:
         self._input_size = input_size
         self._min_confidence = min_confidence
 
-    def detect_all(self, frame: np.ndarray) -> List[Detection]:
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _run_inference(self, frame: np.ndarray):
+        """Run the model on *frame* and return (classes_arr, scores_arr).
+
+        Both arrays are 1-D numpy arrays aligned by detection slot.
+        Returns ``(None, None)`` if the output tensors could not be parsed.
+        """
         import cv2  # noqa: WPS433
 
         resized = cv2.resize(frame, (self._input_size, self._input_size))
@@ -137,8 +154,7 @@ class TFLiteDetector:
             elif "class" in name or "category" in name or "label" in name:
                 classes_arr = tensor
 
-        # Fall back to positional order (index 1 = classes, index 2 = scores)
-        # if names were not informative enough.
+        # Fall back to positional order if names were not informative.
         if scores_arr is None or classes_arr is None:
             outs = [
                 np.squeeze(self._interpreter.get_tensor(d["index"]))
@@ -149,6 +165,14 @@ class TFLiteDetector:
                 classes_arr = one_d[0]   # first 1-D output = class IDs
                 scores_arr = one_d[1]    # second 1-D output = scores
 
+        return classes_arr, scores_arr
+
+    # ------------------------------------------------------------------
+    # Public detection methods
+    # ------------------------------------------------------------------
+
+    def detect_all(self, frame: np.ndarray) -> List[Detection]:
+        classes_arr, scores_arr = self._run_inference(frame)
         if scores_arr is None or classes_arr is None:
             log.warning("Could not parse TFLite outputs; no detections emitted")
             return []
@@ -168,7 +192,33 @@ class TFLiteDetector:
             if cat is not None:
                 results.append(Detection(label=label, category=cat, confidence=score))
             else:
-                log.debug("Detected '%s' (%.2f) — no waste category mapping, skipped", label, score)
+                log.info("Detected '%s' (%.2f) — not mapped to a waste category", label, score)
+        return results
+
+    def preview_all(self, frame: np.ndarray) -> List[dict]:
+        """Return ALL model predictions above a low threshold (0.10) as raw dicts.
+
+        Unlike :meth:`detect_all` this does **not** filter by waste category, so
+        you can see exactly what the model is detecting (even if it's not yet in
+        ``LABEL_TO_CATEGORY``).  Used by the dashboard "What's here?" scan.
+        ``category`` is ``None`` when the label has no waste-category mapping.
+        """
+        classes_arr, scores_arr = self._run_inference(frame)
+        if scores_arr is None or classes_arr is None:
+            return []
+
+        results: List[dict] = []
+        for i in range(len(scores_arr)):
+            score = float(scores_arr[i])
+            if score < 0.10:
+                continue
+            class_idx = int(classes_arr[i])
+            label = (
+                self._labels[class_idx]
+                if 0 <= class_idx < len(self._labels)
+                else f"class_{class_idx}"
+            )
+            results.append({"label": label, "confidence": score, "category": category_for(label)})
         return results
 
 
@@ -248,7 +298,9 @@ class TFLiteClassifier:
         confidence = float(probs[top_idx])
 
         if confidence < self._min_confidence:
-            log.debug("Top prediction confidence %.2f below threshold %.2f", confidence, self._min_confidence)
+            log.info("Top prediction '%s' confidence %.2f below threshold %.2f",
+                     self._labels[top_idx] if 0 <= top_idx < len(self._labels) else f"class_{top_idx}",
+                     confidence, self._min_confidence)
             return []
 
         label = (
@@ -258,10 +310,42 @@ class TFLiteClassifier:
         )
         cat = category_for(label)
         if cat is None:
-            log.debug("Classified as '%s' (%.2f) — no waste category mapping, skipped", label, confidence)
+            log.info("Classified as '%s' (%.2f) — not mapped to a waste category", label, confidence)
             return []
 
         return [Detection(label=label, category=cat, confidence=confidence)]
+
+    def preview_all(self, frame: np.ndarray) -> List[dict]:
+        """Return the top-5 class predictions as raw dicts (no category filter).
+
+        Used by the dashboard debug scan.  ``category`` is ``None`` when the
+        label has no waste-category mapping.
+        """
+        import cv2  # noqa: WPS433
+
+        resized = cv2.resize(frame, (self._input_size, self._input_size))
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+
+        if self._input_dtype == np.uint8:
+            input_tensor = np.expand_dims(rgb, axis=0).astype(np.uint8)
+        else:
+            input_tensor = np.expand_dims(rgb.astype(np.float32) / 255.0, axis=0)
+
+        self._interpreter.set_tensor(self._input_details[0]["index"], input_tensor)
+        self._interpreter.invoke()
+
+        probs = np.squeeze(
+            self._interpreter.get_tensor(self._output_details[0]["index"])
+        )
+        top_indices = np.argsort(probs)[::-1][:5]  # top-5
+        results: List[dict] = []
+        for idx in top_indices:
+            conf = float(probs[idx])
+            if conf < 0.05:
+                break
+            label = self._labels[idx] if 0 <= idx < len(self._labels) else f"class_{idx}"
+            results.append({"label": label, "confidence": conf, "category": category_for(label)})
+        return results
 
 
 # ---------------------------------------------------------------------------
