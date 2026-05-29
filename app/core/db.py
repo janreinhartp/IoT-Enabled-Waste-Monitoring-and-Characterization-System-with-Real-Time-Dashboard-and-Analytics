@@ -43,6 +43,7 @@ DEFAULT_CATEGORIES = [
     ("Paper", "paper", "#f59e0b"),
     ("Metal", "metal", "#6b7280"),
     ("Glass", "glass", "#10b981"),
+    ("Unknown", "unknown", "#9ca3af"),
 ]
 
 

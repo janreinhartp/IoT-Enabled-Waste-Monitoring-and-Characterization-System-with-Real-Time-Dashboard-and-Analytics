@@ -190,8 +190,8 @@ class Pipeline:
             image_path = self._save_image(frame)
 
         if not detections:
-            log.info("No recognizable items detected in frame; event skipped.")
-            return
+            log.info("No recognizable items detected in frame; recording as unknown.")
+            detections = [Detection(label="unknown", category="unknown", confidence=0.0)]
 
         # Split weight equally among all detected items.
         weight_per_item = weight_g / len(detections)

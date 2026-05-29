@@ -85,8 +85,9 @@ class ADS1115Scale:
     def read_raw_average(self, samples: int = 8) -> float:
         return sum(self._read_voltage() for _ in range(samples)) / samples
 
-    def read_grams(self) -> float:
-        voltage = self._read_voltage()
+    def read_grams(self, samples: int = 4) -> float:
+        """Return current weight in grams, averaged over ``samples`` readings."""
+        voltage = self.read_raw_average(samples)
         return (voltage - self._tare_offset) / self._calibration_factor
 
     def tare(self, samples: int = 16) -> None:

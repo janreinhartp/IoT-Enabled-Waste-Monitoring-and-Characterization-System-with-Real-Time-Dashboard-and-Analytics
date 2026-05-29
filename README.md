@@ -190,7 +190,7 @@ Pipeline._handle_event(weight_g)
 
 | Rule | Detail |
 |---|---|
-| Event skipped if nothing detected | If the AI finds no recognisable object in the frame the event is not saved. |
+| Event skipped if nothing detected | If the AI finds no recognisable object in the frame the event is still saved, but the category and label are recorded as **unknown** with 0% confidence. |
 | Weight split equally | If multiple objects are detected in one frame the total weight is divided equally between them. |
 | Reset required between events | After an event fires the weight must drop below `reset_threshold_g` (default 2 g) before the next event is accepted. |
 | Bin capacity check | If the total weight reaches `events.capacity_kg` the pipeline pauses and the dashboard shows a "bin full" warning until the bin is emptied. |
@@ -429,7 +429,7 @@ This prints something like `192.168.1.105`. Use that number.
 |---|---|
 | On the Pi itself | `http://localhost:5000` |
 | On another device (phone, laptop) on the same Wi-Fi | `http://192.168.1.105:5000` *(use your actual IP from `hostname -I`)* |
-| Using hostname (after mDNS setup) | `http://wastemonitor.local:5000` |
+| Using hostname (after mDNS setup) | `http://Waste-Monitoring.local:5000` |
 
 > **Tip:** To keep the server running after you close the terminal, see
 > [Auto-start on boot](#auto-start-on-boot-systemd) or run it with `nohup python run.py &`.
@@ -438,19 +438,19 @@ This prints something like `192.168.1.105`. Use that number.
 
 ## Accessing by Hostname (mDNS / .local)
 
-Instead of typing an IP address, you can give the Pi a memorable hostname reachable as `http://wastemonitor.local:5000` from any device on the same network — no internet required, works over both Wi-Fi and Ethernet.
+Instead of typing an IP address, you can give the Pi a memorable hostname reachable as `http://Waste-Monitoring.local:5000` from any device on the same network — no internet required, works over both Wi-Fi and Ethernet.
 
 ### 1 — Install Avahi and set the hostname
 
 ```bash
 sudo apt install -y avahi-daemon
-sudo hostnamectl set-hostname wastemonitor
+sudo hostnamectl set-hostname Waste-Monitoring
 ```
 
 ### 2 — Fix /etc/hosts (prevents sudo warnings)
 
 ```bash
-sudo sed -i "s/127.0.1.1.*/127.0.1.1\twastemonitor/" /etc/hosts
+sudo sed -i "s/127.0.1.1.*/127.0.1.1\tWaste-Monitoring/" /etc/hosts
 ```
 
 ### 3 — Enable Avahi and reboot
@@ -463,7 +463,7 @@ sudo reboot
 After reboot, from any device on the same network:
 
 ```
-http://wastemonitor.local:5000
+http://Waste-Monitoring.local:5000
 ```
 
 > **Windows:** mDNS (`.local`) is supported natively on Windows 10/11, macOS, iOS, and Android.
@@ -471,7 +471,7 @@ http://wastemonitor.local:5000
 
 ### Optional — remove the port number
 
-To access as just `http://wastemonitor.local`, bind Flask to port 80 using `authbind`:
+To access as just `http://Waste-Monitoring.local`, bind Flask to port 80 using `authbind`:
 
 ```bash
 sudo apt install -y authbind
@@ -624,6 +624,72 @@ To run as a different user (e.g. not `pi`):
 
 ```bash
 WASTE_USER=myuser sudo bash scripts/install_service.sh
+```
+
+---
+
+## Deploying a New Build
+
+Use this workflow every time you push updated code to the Pi.
+
+### Option A — Git pull + service restart (recommended)
+
+```bash
+cd ~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics
+git pull
+source venv/bin/activate
+pip install -r requirements.txt -r requirements-pi.txt   # only needed if dependencies changed
+sudo systemctl restart waste-monitor
+```
+
+Check it came back up:
+```bash
+sudo systemctl status waste-monitor
+```
+
+Watch live logs to confirm no errors:
+```bash
+journalctl -u waste-monitor -f
+```
+
+### Option B — Copy files manually (no Git on Pi)
+
+From your **laptop / dev machine**, copy the updated project over SSH:
+
+```powershell
+# Windows (PowerShell) — run from the project root
+scp -r . pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/
+```
+
+```bash
+# macOS / Linux
+rsync -av --exclude '.venv' --exclude '__pycache__' --exclude 'data/' \
+  ./ pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/
+```
+
+Then SSH in and restart:
+
+```bash
+ssh pi@Waste-Monitoring.local
+cd ~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics
+source venv/bin/activate
+pip install -r requirements.txt -r requirements-pi.txt   # only if deps changed
+sudo systemctl restart waste-monitor
+sudo systemctl status waste-monitor
+```
+
+### Full reboot (only if required)
+
+A plain service restart is enough for code changes. Only do a full reboot if you changed hardware wiring, the Pi's hostname, or a system-level config:
+
+```bash
+sudo reboot
+```
+
+The service starts automatically on boot (systemd). Wait ~30 seconds, then open:
+
+```
+http://Waste-Monitoring.local:5000
 ```
 
 ---
