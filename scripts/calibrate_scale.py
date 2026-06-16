@@ -1,12 +1,18 @@
-"""Interactive scale tare + calibration helper for the ADS1115 (channel 1).
+"""Interactive calibration helper for the RS485 Modbus RTU weight indicator module.
 
 Usage on the Raspberry Pi:
     python -m scripts.calibrate_scale --known-weight 500
 
-This will:
-  1. Ask you to clear the scale, then capture a tare offset (voltage in V).
-  2. Ask you to place a known weight, then compute the calibration factor (V/g).
-  3. Print values you can paste into ``config.yaml`` under ``hardware.scale``.
+Steps performed:
+  1. Send a zero-calibration command (empty scale must be on the load cell).
+  2. Ask you to place a known weight, then send a weight-point calibration command.
+
+All calibration is handled internally by the module — no config values need to
+be stored in config.yaml (tare and calibration state live on the device).
+
+For decimal places / unit configuration, edit config.yaml under hardware.scale:
+  decimal_places: 0        # 0 = raw grams, 2 = e.g. kg with 2 decimal places
+  unit_to_grams: 1.0       # 1.0 = grams, 1000.0 = kg
 """
 
 from __future__ import annotations
@@ -20,17 +26,19 @@ from app.utils import setup_logging, get_logger
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="ADS1115 channel 1 tare + calibration")
+    parser = argparse.ArgumentParser(
+        description="RS485 Modbus RTU weight module zero + weight-point calibration"
+    )
     parser.add_argument(
         "--known-weight",
         type=float,
         required=True,
-        help="Known reference weight in grams (e.g. 500)",
+        help=(
+            "Known reference weight expressed in the module's calibrated unit "
+            "(grams if unit_to_grams=1.0, kg if unit_to_grams=1000.0)."
+        ),
     )
     parser.add_argument("-c", "--config", help="Path to config.yaml")
-    parser.add_argument(
-        "--samples", type=int, default=32, help="Samples to average (default 32)"
-    )
     args = parser.parse_args(argv)
 
     setup_logging("INFO")
@@ -44,42 +52,54 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    # Import here so this script can be imported on non-Pi systems for tests.
-    from app.hardware.scale import ADS1115Scale
+    from app.hardware.scale import ModbusRTUScale
 
     sc = cfg.hardware.scale
-    scale = ADS1115Scale(
-        i2c_address=sc.i2c_address,
-        gain=sc.gain,
-        calibration_factor=1.0,  # use raw voltage for calibration
-        tare_offset=0.0,
+    scale = ModbusRTUScale(
+        port=sc.port,
+        slave_address=sc.slave_address,
+        baud_rate=sc.baud_rate,
+        decimal_places=sc.decimal_places,
+        unit_to_grams=sc.unit_to_grams,
+        timeout=sc.timeout,
     )
 
-    input("Remove all weight from the scale, then press Enter to tare…")
+    # ---- Step 1: Zero calibration ----------------------------------------
+    input("Remove ALL weight from the scale, then press Enter to send zero calibration…")
     time.sleep(0.5)
-    tare = scale.read_raw_average(args.samples)
-    print(f"Tare offset (voltage): {tare:.6f} V")
+    scale.zero_calibrate()
+    time.sleep(1.0)  # Give module time to complete calibration
+    reading_empty = scale.read_grams()
+    print(f"Zero calibration sent. Current reading: {reading_empty:.2f} g  (should be ~0)")
 
+    # ---- Step 2: Weight-point calibration ----------------------------------
     input(
-        f"Place the known weight ({args.known_weight} g) on the scale, "
-        f"then press Enter to calibrate…"
+        f"\nPlace the known weight ({args.known_weight} {_unit_label(sc.unit_to_grams)}) "
+        f"on the scale, then press Enter to send weight-point calibration…"
     )
     time.sleep(0.5)
-    loaded = scale.read_raw_average(args.samples)
-    delta = loaded - tare
-    if abs(delta) < 1e-6:
-        print("ERROR: no change in reading. Check wiring.", file=sys.stderr)
-        return 1
 
-    factor = delta / float(args.known_weight)
-    print()
-    print("=== Add the following to config.yaml under hardware.scale: ===")
-    print(f"  tare_offset: {tare:.6f}")
-    print(f"  calibration_factor: {factor:.8f}")
-    print()
-    print("Verifying: reading at known weight =", (loaded - tare) / factor, "g")
+    # Convert known_weight (in module's unit) to the raw integer the module expects
+    # raw = known_weight * 10**decimal_places  (inverse of the read conversion)
+    known_raw = round(args.known_weight * (10 ** sc.decimal_places))
+    scale.weight_point_calibrate(known_raw)
+    time.sleep(1.0)
+
+    reading_loaded = scale.read_grams()
+    print(f"Weight-point calibration sent. Current reading: {reading_loaded:.2f} g")
+    print(
+        f"Expected: {args.known_weight * sc.unit_to_grams:.2f} g  —  "
+        f"Error: {abs(reading_loaded - args.known_weight * sc.unit_to_grams):.2f} g"
+    )
+    print("\nCalibration complete. No config.yaml changes required.")
     scale.close()
     return 0
+
+
+def _unit_label(unit_to_grams: float) -> str:
+    if unit_to_grams >= 1000.0:
+        return "kg"
+    return "g"
 
 
 if __name__ == "__main__":

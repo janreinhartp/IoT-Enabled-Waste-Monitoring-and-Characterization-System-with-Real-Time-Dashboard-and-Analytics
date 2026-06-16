@@ -2,8 +2,16 @@
 #   pip install -r requirements.txt -r requirements-pi.txt
 -r requirements.txt
 
-adafruit-circuitpython-ads1x15>=2.2
-adafruit-blinka>=8.0
+# minimalmodbus and pyserial are already in requirements.txt and cover RS485 Modbus RTU.
+# No extra Pi-specific packages needed for the scale.
+
+# I2C LCD display (HD44780 + PCF8574 backpack)
+RPLCD>=1.3
+smbus2>=0.4
+
+# Physical GPIO button
+RPi.GPIO>=0.7
+
 # tflite-runtime was renamed to ai-edge-litert by Google and is the only package
 # that supports Python 3.12+ (Raspberry Pi OS Bookworm / Trixie).
 # It installs the same tflite_runtime module so no code changes are needed.

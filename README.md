@@ -9,218 +9,127 @@ An IoT system that **weighs** an item placed on a load-cell scale, **identifies*
 | Raspberry Pi (3/4/5) | 1 | Runs the whole stack. Connected to the router via Ethernet. |
 | Load cells | 4 | Wired to the junction box to form a single Wheatstone bridge. |
 | Load cell junction box | 1 | Combines the 4 load cells into E+/E−/S+/S− outputs. |
-| External load cell monitor / signal conditioner | 1 | Powered by 12 V; outputs 0–5 V analog (AO + GND) to the ADS1115. |
-| ADS1115 16-bit ADC | 1 | Powered at 5 V (from buck converter). Reads the 0–5 V signal on **AIN0**. I²C address 0x48 (ADDR → GND). |
-| BSS138 bidirectional I²C level shifter | 1 | Translates 3.3 V Pi I²C ↔ 5 V ADS1115 logic. |
-| Buck converter (12 V → 5 V) | 1 | Steps down the 12 V supply to 5 V for the Pi and ADS1115. |
-| 12 V DC power supply (≥ 3 A) | 1 | Powers the load cell monitor directly, and the buck converter. |
+| RS485 Modbus RTU weight indicator module | 1 | Powered by 10–28 V DC. Reads the load cell bridge directly. Communicates over RS485 Modbus RTU at 9600 baud. |
+| Feiyang TTL-to-RS485 module | 1 | Converts Pi 3.3 V UART (TXD/RXD) to RS485 differential pair (A+/B−). Auto direction control — no DE/RE pin needed. |
+| I2C LCD display (HD44780) | 1 | 16×2 or 20×4 character LCD with PCF8574 I2C backpack. Displays live weight + AI detection. |
+| Push button × 2 | 2 | **Analyze** (GPIO 17) and **Record** (GPIO 27). Normally-open, wired to GND. Internal pull-up enabled via RPi.GPIO. |
+| Buck converter (12 V → 5 V) | 1 | Steps down the 12 V supply to 5 V for the Pi. |
+| 12 V DC power supply (≥ 3 A) | 1 | Powers the weight indicator module directly, and the buck converter. |
 | USB camera | 1 | Plugged into any Pi USB port. |
 | Router | 1 | Pi connects via Ethernet for network access. |
 
-Enable I²C on the Pi — see [step 1a below](#1a--enable-i2c).
-
-## Wiring
-
-```mermaid
-graph TD
-    subgraph CELLS["Load Cells ×4"]
-        LC1["Load Cell 1"]
-        LC2["Load Cell 2"]
-        LC3["Load Cell 3"]
-        LC4["Load Cell 4"]
-    end
-
-    LC1 & LC2 & LC3 & LC4 -->|"Red → E+  /  Black → E−  /  White → S+  /  Green → S−"| JB
-
-    JB["Junction Box"] -->|"EXC+  ·  EXC−  ·  SIG+  ·  SIG−"| MON
-
-    PSU["12V DC Power Supply"] -->|"+12V  ·  GND"| MON["Load Cell Monitor"]
-    PSU          -->|"+12V  ·  GND"| BUCK["Buck Converter  12V → 5V"]
-
-    BUCK -->|"5V  ·  GND"| ADS
-    BUCK -->|"5V via USB-C  ·  GND via Pin 6"| PI
-
-    MON  -->|"AO 0–5V → AIN0  ·  GND → GND"| ADS["ADS1115 ADC\n(ADDR → GND  ·  addr 0x48)"]
-
-    ADS  -->|"SDA → HV1  ·  SCL → HV2  ·  VDD → HV  ·  GND → GND"| LS["BSS138 Level Shifter\n5V side ↔ 3.3V side"]
-
-    LS   -->|"LV1 → Pin 3 SDA  ·  LV2 → Pin 5 SCL  ·  LV → Pin 1 3V3  ·  GND → Pin 6"| PI["Raspberry Pi"]
-
-    PI   -->|"RJ-45 Ethernet"| RT["Router / LAN"]
-```
-
-> **Common ground:** Buck Converter VOUT−, ADS1115 GND, Level Shifter GND, Load Cell Monitor GND, and Pi Pin 6 must all share a single GND rail.
-
-> **ADDR pin** on the ADS1115 tied to GND sets the I²C address to **0x48**. Verify with `i2cdetect -y 1`.
-
-> **Buck converter** output must be trimmed to exactly **5.0 V** before connecting any load.
-
----
-
-### Pin Reference Tables
-
-#### Load Cells → Junction Box (all 4 cells identical)
-
-| Wire colour | Junction Box terminal |
-|---|---|
-| Red | E+ |
-| Black | E− |
-| White | S+ |
-| Green | S− |
-
-#### Junction Box → Load Cell Monitor
-
-| Junction Box | Load Cell Monitor |
-|---|---|
-| E+ | EXC+ |
-| E− | EXC− |
-| S+ | SIG+ |
-| S− | SIG− |
-
-#### 12V PSU → Load Cell Monitor & Buck Converter
-
-| PSU | Load Cell Monitor | Buck Converter |
-|---|---|---|
-| +12V | VCC | VIN+ |
-| GND | GND | VIN− |
-
-#### Buck Converter (5V out) → Pi & ADS1115
-
-| Buck Out | Destination |
-|---|---|
-| 5V | Pi USB-C (preferred) or GPIO Pin 2 / Pin 4 |
-| GND | Pi GPIO Pin 6 |
-| 5V | ADS1115 VDD |
-| GND | ADS1115 GND |
-
-#### Load Cell Monitor → ADS1115
-
-| Monitor | ADS1115 |
-|---|---|
-| AO (0–5V) | AIN0 |
-| GND / AGND | GND |
-
-#### ADS1115 → Level Shifter (5V side)
-
-| ADS1115 | Level Shifter |
-|---|---|
-| SDA | HV1 |
-| SCL | HV2 |
-| VDD (5V) | HV |
-| GND | GND |
-| ADDR | GND → sets address 0x48 |
-
-#### Level Shifter (3.3V side) → Raspberry Pi
-
-| Level Shifter | Pi Pin | Function |
-|---|---|---|
-| LV1 | Pin 3 | SDA1 (GPIO 2) |
-| LV2 | Pin 5 | SCL1 (GPIO 3) |
-| LV | Pin 1 | 3.3V reference |
-| GND | Pin 6 | GND |
-
-#### Raspberry Pi → Router
-
-| Pi port | Cable | Router |
-|---|---|---|
-| RJ-45 Ethernet | Cat 5e / Cat 6 | Any LAN port |
-
----
-
-### Power Budget
-
-| Component | Rail | Typical draw |
-|---|---|---|
-| Raspberry Pi 4 | 5V (buck) | 600 mA idle · 1.2 A load |
-| ADS1115 | 5V (buck) | < 1 mA |
-| BSS138 level shifter | 3.3V / 5V | < 1 mA |
-| Load cell monitor | 12V (PSU) | ~100–200 mA |
-| USB camera | Pi USB 5V | 200–500 mA |
-| **5V rail total** | **Buck** | **≈ 2 A peak** |
-
-A **12V / 3A** (36 W) PSU with a buck converter rated ≥ 3 A is sufficient.
-
+Enable the Pi hardware UART — see [step 1a below](#1a--enable-uart).
 
 ## Architecture
 
 ```
-┌───────────────┐   ┌──────────────┐   ┌────────────┐
-│   ADS1115     │──▶│              │   │  USB Cam   │
-│  (AIN1, 5V)  │   │  Raspberry   │◀──│            │
-└───────────────┘   │     Pi       │   └────────────┘
-                    │              │
-                    │   Python     │──▶ SQLite ──▶ Flask + SocketIO ──▶ Browser dashboard
-                    │   services   │
-                    └──────────────┘
+┌─────────────────────┐   ┌──────────────────────────────────────────┐   ┌────────────┐
+│  RS485 Weight       │   │                                          │   │  USB Cam   │
+│  Indicator Module   │──▶│              Raspberry Pi                │◀──│            │
+│  (Modbus RTU)       │   │                                          │   └────────────┘
+└─────────────────────┘   │  Python services                         │
+  RS485 ↕ TTL module      │                                          │──▶ SQLite ──▶ Flask + SocketIO ──▶ Browser
+  (Feiyang, UART GPIO)     │                                          │
+                           └──────────┬────────────┬─────────────────┘
+                                      │            │
+                               I²C LCD display   GPIO 17 (Analyze btn)
+                               (live weight +    GPIO 27 (Record btn)
+                                AI detection)
 ```
 
 A single Python process runs:
-1. A background thread sampling the ADS1115 channel 1 voltage at ~10 Hz.
-2. A stable-event detector that fires only when the derived weight is above a threshold **and** stable for a configurable window (ignores oscillation and adjustments).
-3. On each event: capture a USB-camera frame → run a TFLite model (object detector **or** image classifier) → map the label to a waste category → save the image → insert a row in SQLite → push a Socket.IO message.
-4. A second background thread running the AI continuously (every 2 s by default), pushing live detection results to the dashboard via Socket.IO — without saving anything. This powers the **"AI sees:"** live panel so you can always see what the camera is detecting.
-5. A Flask + Flask-SocketIO web server with a live dashboard and analytics page.
+1. A background thread polling the weight indicator via **RS485 Modbus RTU** at ~10 Hz — reading the real-time net weight register (registers 0–1, signed 32-bit).
+2. A stable-event detector that fires only when the weight is above a threshold **and** stable for a configurable window (ignores oscillation and adjustments).
+3. A second background thread running the AI continuously (every 2 s by default), pushing live detection results to the dashboard via Socket.IO — without saving anything. This powers the **"AI sees:"** live panel.
+4. A Flask + Flask-SocketIO web server with a live dashboard and analytics page.
+5. GPIO edge-detection watching two physical buttons — **Analyze** (GPIO 17) and **Record** (GPIO 27).
 
 ## How an Item is Recorded
 
-Two parallel loops run continuously once the system starts:
+Recording uses a deliberate **two-step analyze → record** flow so the AI capture and the weight reading happen at the right moments:
 
 ```
-Scale polling (~10 Hz)              AI preview loop (every 2 s)
-    │                                       │
-    ▼                                       ▼
-StableEventDetector.push(grams)     camera.capture()
-    │  Fires when:                          │
-    │    • weight ≥ min_weight_g            ▼
-    │    • stddev of last N ≤ stability_g  detector.preview_all(frame)
-    ▼                                       │  All detections ≥ 10% confidence,
-Pipeline._handle_event(weight_g)            │  including unmapped labels
-    │  ← also triggered by                 ▼
-    │    "Record Now" button       broadcast_ai_preview()
-    │                                       │
-    ├─ camera.capture()                     ▼
-    ├─ detector.detect_all(frame)   Socket.IO → Browser
-    ├─ save_jpeg(frame, path)       "AI sees:" panel updates live
-    │
-    └─ for each detection:
-           db.insert_event(...)   → writes one row to the waste_events SQLite table
-           socketio.emit(...)     → pushes "new_event" to the live dashboard
+  Item in front of camera
+          │
+          ▼
+  ┌─ Step 1: Analyze ──────────────────────────────────────────────────────┐
+  │  Dashboard button  /api/analyze   ──OR──  Physical GPIO 17 button      │
+  │                                                                         │
+  │  pipeline.analyze_and_hold()                                           │
+  │     ├─ camera.capture()                                                │
+  │     ├─ detector.detect_all(frame)                                      │
+  │     ├─ save_jpeg(frame, path)  ← image saved NOW before item moves     │
+  │     └─ stores PendingDetection(image_path, detections) in memory       │
+  │                                                                         │
+  │  LCD row 1: detected label + confidence                                │
+  │  Dashboard: pending panel shows thumbnail + label + confidence         │
+  └─────────────────────────────────────────────────────────────────────── ┘
+          │
+          ▼  move item to scale, wait for weight to stabilise
+          │
+  ┌─ Step 2: Record Weight ────────────────────────────────────────────────┐
+  │  Dashboard button  /api/commit   ──OR──  Physical GPIO 27 button       │
+  │                                                                         │
+  │  pipeline.commit_pending()                                             │
+  │     ├─ reads current live weight_g from scale                          │
+  │     ├─ db.insert_event(pending image, detections, weight_g)            │
+  │     └─ socketio.emit("new_event") → dashboard updates live             │
+  │                                                                         │
+  │  PendingDetection is consumed and cleared                              │
+  └─────────────────────────────────────────────────────────────────────── ┘
+
+Background loops (always running):
+  Scale polling  (~10 Hz)    →  StableEventDetector → LCD weight row updates at ~2 Hz
+  AI preview     (every 2 s) →  broadcast_ai_preview() → Socket.IO "AI sees:" panel
 ```
 
 **Important rules:**
 
 | Rule | Detail |
 |---|---|
-| Event skipped if nothing detected | If the AI finds no recognisable object in the frame the event is not saved. |
-| Manual record button | The **Record Now** button scans first, shows what was detected, then saves — useful when the scale is noisy. |
-| Live "AI sees:" panel | Updates automatically every 2 s via Socket.IO. Shows all model predictions including low-confidence and unmapped labels. Interval controlled by `ai.ai_preview_interval_s` (set to `0` to disable). |
+| Analyze before Record | You must press **Analyze** before **Record Weight**. The Record button is disabled until a pending detection exists. |
+| Image captured at Analyze time | The JPEG is saved when Analyze is pressed, so it captures the item in front of the camera — not after it has been moved to the scale. |
+| Event skipped if nothing detected | If the AI finds no recognisable object the pending state is not set and the Record button stays disabled. |
+| Clear pending | Use the **✕ Clear** button (dashboard) or press Analyze again to discard a pending detection without recording. |
+| Live "AI sees:" panel | Updates automatically every 2 s via Socket.IO without saving anything — shows all model predictions including low-confidence labels. Interval controlled by `ai.ai_preview_interval_s` (set to `0` to disable). |
 | Weight split equally | If multiple objects are detected in one frame the total weight is divided equally between them. |
-| Reset required between events | After an event fires the weight must drop below `reset_threshold_g` (default 2 g) before the next event is accepted. |
-| Bin capacity check | If the total weight reaches `events.capacity_kg` the pipeline pauses and the dashboard shows a "bin full" warning until the bin is emptied. |
+| Reset required between events | After an event fires the weight must drop below `reset_threshold_g` (default 2 g) before the stable-event detector resets. |
+| Bin capacity check | If the total weight reaches `events.capacity_kg` the pipeline pauses and the dashboard shows a "bin full" warning. |
+| Legacy Record Now | The original **Record Now** button (`POST /api/record`) still works — it commits the pending detection if one exists, otherwise falls back to a fresh capture + record in one step. |
 ---
 
 ## Project Layout
 
 ```
 .
-├── run.py                       # entrypoint
+├── run.py                       # entrypoint — wires pipeline, LCD, buttons, Flask
 ├── config.example.yaml          # copy to config.yaml and edit
-├── requirements.txt             # base deps (work on any OS)
-├── requirements-pi.txt          # Pi-only deps (ADS1115, ai-edge-litert)
+├── requirements.txt             # base deps (work on any OS) — includes minimalmodbus + pyserial
+├── requirements-pi.txt          # Pi-only deps — ai-edge-litert, RPLCD, smbus2, RPi.GPIO
 ├── app/
-│   ├── config.py                # YAML config loader
-│   ├── hardware/                # Scale + Camera (real + mock)
+│   ├── config.py                # YAML config loader — ScaleConfig, LCDConfig, ButtonConfig
+│   ├── hardware/
+│   │   ├── scale.py             # ModbusRTUScale driver (replaces ADS1115)
+│   │   ├── camera.py            # USB camera driver
+│   │   ├── lcd.py               # I2CLCD / MockLCD — HD44780 over PCF8574 I2C backpack
+│   │   ├── button.py            # ButtonWatcher / MockButton — GPIO edge detection
+│   │   └── mock.py              # MockScale, MockCamera (development without Pi)
 │   ├── ai/                      # Detector interface, TFLite impl, label maps
-│   ├── core/                    # Pipeline, DB models, dataclasses
-│   ├── web/                     # Flask app, routes, templates, static
+│   ├── core/
+│   │   ├── pipeline.py          # Orchestration — analyze_and_hold(), commit_pending()
+│   │   ├── db.py                # SQLAlchemy models + queries
+│   │   └── events.py            # WasteEvent, Detection, PendingDetection dataclasses
+│   ├── web/
+│   │   ├── routes.py            # Flask routes + Socket.IO handlers
+│   │   ├── server.py            # Flask app factory
 │   │   └── templates/
-│   │       ├── dashboard.html   # live weight + scale status + camera feed
+│   │       ├── dashboard.html   # live weight + two-step Analyze/Record UI + camera feed
 │   │       ├── analytics.html   # charts
 │   │       ├── settings.html    # database reset page
 │   │       └── base.html
 │   └── utils/                   # logging
 ├── scripts/
-│   ├── calibrate_scale.py       # interactive tare + calibration (voltage-based)
+│   ├── calibrate_scale.py       # interactive zero + weight-point calibration via Modbus
 │   ├── download_model.py        # fetches EfficientDet-Lite0 TFLite model
 │   └── install_service.sh       # installs + enables the systemd service
 ├── tests/                       # pytest suite (uses mock hardware)
@@ -262,10 +171,12 @@ Open <http://localhost:5000>. The mock scale simulates items being placed and re
 
 ```bash
 sudo apt update
-sudo apt install -y python3-pip python3-venv python3-opencv i2c-tools libopenblas-dev
+sudo apt install -y python3-pip python3-venv python3-opencv libopenblas-dev i2c-tools
 ```
 
-### 1a — Enable I²C
+### 1a — Enable UART
+
+The weight indicator communicates over RS485 via the Pi's hardware UART. You must enable it and disable the serial console that occupies it by default.
 
 **Option A — raspi-config (easiest)**
 
@@ -273,44 +184,70 @@ sudo apt install -y python3-pip python3-venv python3-opencv i2c-tools libopenbla
 sudo raspi-config
 ```
 
-Navigate to *Interface Options* → *I2C* → *Yes* → *Finish*, then reboot:
+Navigate to *Interface Options* → *Serial Port*:
+- **"Would you like a login shell to be accessible over serial?"** → **No**
+- **"Would you like the serial port hardware to be enabled?"** → **Yes**
+
+Finish, then reboot:
 
 ```bash
 sudo reboot
 ```
 
-**Option B — manual (Trixie / Bookworm)**
-
-On Raspberry Pi OS Trixie and Bookworm the boot config is at `/boot/firmware/config.txt` (not `/boot/config.txt`):
+**Option B — manual (Bookworm / Trixie)**
 
 ```bash
-# Add the I2C overlay if it is not already present
-grep -q 'dtparam=i2c_arm=on' /boot/firmware/config.txt \
-  || echo 'dtparam=i2c_arm=on' | sudo tee -a /boot/firmware/config.txt
+# Disable the serial console
+sudo sed -i 's/console=serial0,[0-9]* //' /boot/firmware/cmdline.txt
 
-# Make sure the i2c-dev module loads at boot
-grep -q 'i2c-dev' /etc/modules \
-  || echo 'i2c-dev' | sudo tee -a /etc/modules
+# Enable the UART hardware
+grep -q 'enable_uart=1' /boot/firmware/config.txt \
+  || echo 'enable_uart=1' | sudo tee -a /boot/firmware/config.txt
 
 sudo reboot
 ```
 
-After the reboot, confirm the device node exists:
+> **Pi 4 / Pi 5 — Bluetooth conflict:** On Pi 4 and Pi 5, `/dev/ttyAMA0` is assigned to Bluetooth by default. Either disable Bluetooth (`dtoverlay=disable-bt` in `/boot/firmware/config.txt`) to free `/dev/ttyAMA0`, or use `/dev/ttyS0` instead and update `config.yaml` accordingly.
+
+After reboot, confirm the port is available:
 
 ```bash
-ls /dev/i2c*   # should show /dev/i2c-1
+ls /dev/ttyAMA0   # should exist after enabling UART
 ```
 
-> **Note:** `libatlas-base-dev` was removed from Raspberry Pi OS Bookworm (Debian 12) and is not present in Trixie (Debian 13) either. Use `libopenblas-dev` instead — it provides the same BLAS/LAPACK functionality required by NumPy and SciPy on ARM.
+### 1b — Enable I²C (for the LCD)
 
-### 2 — Verify the ADS1115 is detected on I²C
+```bash
+sudo raspi-config
+# Interface Options → I2C → Yes → Finish → Reboot
+```
+
+After reboot, verify the LCD is detected:
 
 ```bash
 i2cdetect -y 1
-# You should see 0x48 in the output
+# You should see 27 or 3f in the grid
 ```
 
-> If you get `Could not open file '/dev/i2c-1'`, I²C is not enabled yet — go back to **step 1a**.
+> If nothing appears, check VCC/GND/SDA/SCL wiring and confirm the backpack address matches `hardware.lcd.i2c_address` in `config.yaml`.
+
+### 2 — Verify the RS485 module is detected
+
+With the Feiyang module wired up and the Pi rebooted, check the port is accessible:
+
+```bash
+python3 -c "
+import minimalmodbus, serial
+i = minimalmodbus.Instrument('/dev/ttyAMA0', 1)
+i.serial.baudrate = 9600
+i.serial.timeout = 1
+print('Net weight raw:', i.read_registers(0, 2, functioncode=3))
+"
+```
+
+You should see two integers printed. If you get a `NoResponseError`, check A+/B− polarity and that the module is powered.
+
+> If using `/dev/ttyS0` instead, replace the port string above and in `config.yaml`.
 
 ### 3 — Python environment
 
@@ -403,26 +340,19 @@ This prints the file so you can check your changes look right.
 
 ### 6 — Calibrate the scale
 
-You can calibrate the scale directly from the web dashboard (recommended) or via the command line.
-
-**Option A — Dashboard (recommended)**
-
-1. Start the system (`python run.py`) and open `http://Waste-Monitoring.local:5000/settings`.
-2. Under **Scale Calibration**, click **Tare Scale** with nothing on the platform.
-3. Enter your known reference weight in grams, place it on the platform, then click **Calibrate & Save**.
-4. The system saves the values to `config.yaml` and restarts automatically.
-
-**Option B — Command line**
+Calibration is performed on the weight indicator module itself via Modbus commands — no `config.yaml` values are stored. Run the calibration script on the Pi:
 
 ```bash
 python -m scripts.calibrate_scale --known-weight 500
 ```
 
 Follow the prompts:
-1. Clear the platform → press Enter (captures tare voltage).
-2. Place the known weight → press Enter (computes V/g calibration factor).
+1. Remove all weight from the platform → press Enter (sends zero-calibration command to module).
+2. Place the known reference weight → press Enter (sends weight-point calibration command).
 
-Copy the printed `tare_offset` and `calibration_factor` values into `config.yaml` under `hardware.scale`.
+The `--known-weight` value is in the module's calibrated unit. If `unit_to_grams=1000.0` (kg), pass the weight in kg (e.g. `--known-weight 0.5` for 500 g).
+
+> **Decimal places:** If your module is configured for 2 decimal places in kg, set `decimal_places: 2` and `unit_to_grams: 1000.0` in `config.yaml` before calibrating.
 
 ### 7 — Start the system
 
@@ -724,12 +654,27 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full annot
 
 | Key | Default | Description |
 |---|---|---|
-| `hardware.use_mock` | `true` | `false` to use real ADS1115 + USB camera |
-| `hardware.scale.i2c_address` | `0x48` | ADS1115 I²C address (ADDR pin → GND) |
-| `hardware.scale.gain` | `0.6667` | ADS1115 PGA: `0.6667`=±6.144 V, `1`=±4.096 V, `2`=±2.048 V. Value is snapped to nearest valid gain automatically. |
-| `hardware.scale.tare_offset` | `0.0` | Sensor voltage (V) at zero weight — set via dashboard or `calibrate_scale.py` |
-| `hardware.scale.calibration_factor` | `1.0` | Volts per gram (V/g) — set via dashboard or `calibrate_scale.py` |
+| `hardware.use_mock` | `true` | `false` to use real RS485 scale + USB camera |
+| `hardware.scale.port` | `/dev/ttyUSB0` | Serial port for the RS485 adapter. Use `/dev/ttyAMA0` (Pi UART via GPIO) or `/dev/ttyS0` |
+| `hardware.scale.slave_address` | `1` | Modbus slave address programmed on the weight indicator module |
+| `hardware.scale.baud_rate` | `9600` | Must match the module setting — supports 9600 / 19200 / 38400 |
+| `hardware.scale.decimal_places` | `0` | Decimal places encoded in the register value. Raw integer ÷ 10ⁿ before applying `unit_to_grams` |
+| `hardware.scale.unit_to_grams` | `1.0` | Multiply (raw / 10^decimal_places) by this to get grams. Use `1000.0` if module is calibrated in kg |
+| `hardware.scale.timeout` | `1.0` | Modbus reply timeout in seconds |
 | `hardware.scale.sample_rate_hz` | `10` | Target polling rate |
+| `hardware.lcd.enabled` | `false` | `true` to enable the I²C LCD display |
+| `hardware.lcd.i2c_address` | `0x27` | PCF8574 backpack I²C address (use `i2cdetect -y 1` to confirm) |
+| `hardware.lcd.cols` | `16` | Number of character columns (16 or 20) |
+| `hardware.lcd.rows` | `2` | Number of character rows (2 or 4) |
+| `hardware.lcd.i2c_port` | `1` | I²C bus number (1 on all modern Pi) |
+| `hardware.button_analyze.enabled` | `false` | `true` to activate the physical Analyze button |
+| `hardware.button_analyze.gpio_pin` | `17` | BCM GPIO pin for the Analyze button |
+| `hardware.button_analyze.debounce_ms` | `300` | Software debounce window in milliseconds |
+| `hardware.button_analyze.mock_interval_s` | `0.0` | Auto-fire interval in mock mode (`0` = disabled) |
+| `hardware.button_record.enabled` | `false` | `true` to activate the physical Record button |
+| `hardware.button_record.gpio_pin` | `27` | BCM GPIO pin for the Record button |
+| `hardware.button_record.debounce_ms` | `300` | Software debounce window in milliseconds |
+| `hardware.button_record.mock_interval_s` | `0.0` | Auto-fire interval in mock mode (`0` = disabled) |
 | `events.min_weight_g` | `5.0` | Minimum weight (g) to start a placement event |
 | `events.stability_window` | `8` | Consecutive samples that must be within `stability_g` stddev |
 | `events.stability_g` | `1.0` | Max stddev (g) to declare a stable reading |
@@ -749,19 +694,19 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full annot
 
 | Route | Description |
 |---|---|
-| `GET /` | Live dashboard — weight, scale status bar, camera feed, latest item, Record Now button |
+| `GET /` | Live dashboard — weight, scale status bar, camera feed, latest item, two-step Analyze / Record Weight buttons |
 | `GET /analytics` | Charts (per-category weight/counts, daily totals) |
-| `GET /settings` | Settings page — scale calibration + database reset |
+| `GET /settings` | Settings page — database reset |
 | `GET /api/events?limit=&offset=&category=&since=&until=` | List events (JSON) |
 | `GET /api/summary?window=all\|today\|week` | Aggregate stats |
 | `GET /api/daily?days=N` | Daily totals for the last N days |
 | `GET /api/categories` | Category list |
 | `GET /api/bin_status` | Current bin-full state and capacity |
-| `POST /api/record` | Manually trigger a record at the current live weight |
+| `POST /api/analyze` | **Step 1** — capture frame, run AI, save image, store pending detection. Returns `{status, label, category, confidence, image_path, all_detections}` or `{status: "no_detection"}` |
+| `POST /api/commit` | **Step 2** — read live weight, write DB row using pending detection, clear pending. Returns `{status: "recorded", weight_g}` or HTTP 409 if no pending detection |
+| `GET /api/pending_detection` | Returns `{pending: bool, label, category, confidence, image_path}` — use to restore UI state on page reload |
+| `POST /api/record` | Legacy one-shot record — commits pending if one exists, otherwise fresh capture + record in a single step |
 | `POST /api/reset_db` | Delete all events and images, returns `{"deleted": N}` |
-| `GET /api/calibrate/status` | Returns current calibration values and whether a tare has been captured |
-| `POST /api/calibrate/tare` | Captures tare voltage (empty scale) |
-| `POST /api/calibrate/finish` | Computes calibration factor from known weight, saves to `config.yaml`, restarts |
 | `GET /api/events.csv` | Export all events as CSV |
 | `GET /images/<event_id>` | Captured image for an event |
 | `GET /video_feed` | MJPEG live camera stream |
@@ -886,8 +831,10 @@ The test suite uses the mock scale, mock camera, and mock detector — no hardwa
 * **Train a waste-specific classifier:** see [Training a Waste Classifier](#training-a-waste-classifier) above. Use Google Teachable Machine to train on your own items and switch to the `classification` backend.
 * **Add more categories:** edit `DEFAULT_CATEGORIES` in `app/core/db.py` and add matching entries to `LABEL_TO_CATEGORY` in `app/ai/labels.py`.
 * **Different DB:** point `database.url` at Postgres/MySQL — the SQLAlchemy layer handles it.
-* **Different ADC channel:** change `Pin.A0` in `app/hardware/scale.py` to `Pin.A1`, `Pin.A2`, or `Pin.A3` to read from a different ADS1115 channel.
-* **Calibrate the scale:** go to `/settings` → **Scale Calibration** to tare and calibrate without touching the command line.
+* **Enable the LCD:** set `hardware.lcd.enabled: true` in `config.yaml`. For a 20×4 display also set `cols: 20` and `rows: 4`. The display updates the weight row at ~2 Hz and the detection row whenever the AI preview fires or Analyze is pressed.
+* **Enable physical buttons:** set `hardware.button_analyze.enabled: true` and `hardware.button_record.enabled: true` in `config.yaml`. Wire each button normally-open between the GPIO pin and GND — the driver enables the internal pull-up resistor.
+* **Read stable weight instead of real-time:** call `scale.read_stable_grams()` instead of `scale.read_grams()` in `app/core/pipeline.py` if you want the module's own stable-hold register instead of the raw real-time register.
+* **Calibrate the scale:** run `python -m scripts.calibrate_scale --known-weight <grams>` on the Pi — calibration is stored on the module, not in `config.yaml`.
 * **Reset database via UI:** go to `/settings` and click **Reset Database** to clear all events and images (useful during testing).
-* **Manual record:** the **Record Now** button on the dashboard bypasses the stable-event detector — useful when the scale is noisy during prototyping.
+* **Two-step flow:** press **Analyze** with the item in front of the camera (captures + detects), then move the item to the scale and press **Record Weight** to pair the AI result with the live weight. The **✕ Clear** button discards a pending detection without recording.
 * **Diagnose scale issues:** the Live Weight card on the dashboard shows a real-time stability progress bar and the current detector state (idle / stabilizing / cooldown).

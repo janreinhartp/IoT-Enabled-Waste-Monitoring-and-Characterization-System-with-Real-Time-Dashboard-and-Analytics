@@ -13,12 +13,18 @@ import numpy as np
 from app.ai.detector import Detector
 from app.config import AppConfig
 from app.core.db import Database
-from app.core.events import Detection, WasteEventRecord
+from app.core.events import Detection, PendingDetection, WasteEventRecord
 from app.hardware.camera import Camera, save_jpeg
 from app.hardware.scale import Scale, StableEventDetector
 from app.utils import get_logger
 
 log = get_logger(__name__)
+
+# Optional LCD — imported lazily to avoid hard dependency on RPLCD.
+try:
+    from app.hardware.lcd import LCD
+except Exception:  # noqa: BLE001
+    LCD = object  # type: ignore[assignment,misc]
 
 
 EventCallback = Callable[[WasteEventRecord], None]
@@ -56,6 +62,7 @@ class Pipeline:
         on_bin_status: Optional[BinStatusCallback] = None,
         on_scale_status: Optional[ScaleStatusCallback] = None,
         on_ai_preview: Optional[AIPreviewCallback] = None,
+        lcd=None,
     ):
         self._cfg = cfg
         self._scale = scale
@@ -68,6 +75,9 @@ class Pipeline:
         self._on_bin_status = on_bin_status
         self._on_scale_status = on_scale_status
         self._on_ai_preview = on_ai_preview
+        self._lcd = lcd
+        self._lcd_weight_interval = 0.5   # update LCD weight at most every 0.5 s
+        self._lcd_last_weight_ts = 0.0
         self._detector_state = StableEventDetector(
             min_weight_g=cfg.events.min_weight_g,
             stability_window=cfg.events.stability_window,
@@ -79,6 +89,9 @@ class Pipeline:
         self._stop = threading.Event()
         self._latest_weight = 0.0
         self._bin_full = False
+        # Pending detection: set by analyze_and_hold(), consumed by commit_pending()
+        self._pending: Optional[PendingDetection] = None
+        self._pending_lock = threading.Lock()
         os.makedirs(cfg.storage.images_dir, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -120,20 +133,106 @@ class Pipeline:
     def bin_full(self) -> bool:
         return self._bin_full
 
-    def record_now(self) -> None:
-        """Manually trigger a record using the current live weight.
+    @property
+    def pending_detection(self) -> Optional[PendingDetection]:
+        """The most recently analyzed (but not yet recorded) detection, or None."""
+        with self._pending_lock:
+            return self._pending
 
-        Runs in a background thread so the caller returns immediately.
-        Useful for prototyping when the scale reading is noisy and the
-        stable-event detector never fires.
+    # ------------------------------------------------------------------
+    # Two-step Analyze → Record flow
+    # ------------------------------------------------------------------
+
+    def analyze_and_hold(self) -> Optional[PendingDetection]:
+        """Step 1 — Capture frame, run AI, save image, store as pending.
+
+        Call this when the **Analyze** button is pressed while the item is
+        still in front of the camera.  The image is saved to disk immediately
+        so it is preserved even if the item is moved before :meth:`commit_pending`
+        is called.
+
+        Returns the :class:`PendingDetection` on success, or ``None`` when
+        the camera is unavailable or nothing is detected.
         """
-        weight = self._latest_weight
-        threading.Thread(
-            target=self._handle_event,
-            args=(weight,),
-            name="waste-manual-record",
-            daemon=True,
-        ).start()
+        log.info("analyze_and_hold: capturing frame")
+        frame = self._safe_capture()
+        if frame is None:
+            log.warning("analyze_and_hold: camera unavailable")
+            return None
+
+        detections = self._safe_detect_all(frame)
+        if not detections:
+            log.info("analyze_and_hold: no detections in frame")
+            return None
+
+        image_path = self._save_image(frame)
+        pending = PendingDetection(image_path=image_path, detections=detections)
+        with self._pending_lock:
+            self._pending = pending
+        top = pending.top()
+        log.info(
+            "analyze_and_hold: pending set — %s (%.0f%%) image=%s",
+            top.label if top else "?",
+            (top.confidence * 100) if top else 0,
+            image_path,
+        )
+        return pending
+
+    def commit_pending(self, weight_g: Optional[float] = None) -> bool:
+        """Step 2 — Attach the current scale weight to the pending detection and save.
+
+        Call this when the **Record** button is pressed after the item has been
+        moved onto the scale and the weight has settled.
+
+        Args:
+            weight_g: Override weight in grams. Uses the latest live reading
+                      when not provided.
+
+        Returns:
+            ``True`` if a pending detection was committed, ``False`` if there
+            was nothing pending (you should call :meth:`analyze_and_hold` first).
+        """
+        with self._pending_lock:
+            pending = self._pending
+            if pending is None:
+                log.warning("commit_pending: no pending detection — press Analyze first")
+                return False
+            self._pending = None  # consume immediately
+
+        g = weight_g if weight_g is not None else self._latest_weight
+        log.info("commit_pending: recording pending detection at %.2f g", g)
+        self._save_event_from_pending(pending, g)
+        return True
+
+    def clear_pending(self) -> None:
+        """Discard any pending detection without recording it."""
+        with self._pending_lock:
+            self._pending = None
+        log.info("clear_pending: pending detection cleared")
+
+    def record_now(self) -> None:
+        """Manually trigger a record at the current live weight.
+
+        If a pending detection exists (Analyze was already pressed) it is
+        committed with the current weight.  Otherwise a fresh capture + detect
+        cycle runs (legacy behaviour — useful from the web dashboard).
+        """
+        with self._pending_lock:
+            has_pending = self._pending is not None
+        if has_pending:
+            threading.Thread(
+                target=self.commit_pending,
+                name="waste-commit-pending",
+                daemon=True,
+            ).start()
+        else:
+            weight = self._latest_weight
+            threading.Thread(
+                target=self._handle_event,
+                args=(weight,),
+                name="waste-manual-record",
+                daemon=True,
+            ).start()
 
     def detect_preview(self) -> List[dict]:
         """Capture a frame and run the detector without saving anything.
@@ -180,6 +279,19 @@ class Pipeline:
                 detections = self.detect_preview()
                 if self._on_ai_preview:
                     self._on_ai_preview(detections)
+                # Update LCD detection line with the top-confidence result
+                if self._lcd:
+                    if detections:
+                        top = max(detections, key=lambda d: d["confidence"])
+                        try:
+                            self._lcd.show_detection(top["label"], top["confidence"])
+                        except Exception:  # noqa: BLE001
+                            log.exception("LCD detection update failed")
+                    else:
+                        try:
+                            self._lcd.show_detection("Nothing", 0.0)
+                        except Exception:  # noqa: BLE001
+                            pass
             except Exception:  # noqa: BLE001
                 log.exception("AI preview loop error")
 
@@ -202,6 +314,14 @@ class Pipeline:
                 time.sleep(interval)
                 continue
             self._latest_weight = grams
+
+            # Update LCD weight display at ~2 Hz (avoids flooding I²C bus)
+            if self._lcd and (t0 - self._lcd_last_weight_ts) >= self._lcd_weight_interval:
+                self._lcd_last_weight_ts = t0
+                try:
+                    self._lcd.show_weight(grams, self._detector_state.state)
+                except Exception:  # noqa: BLE001
+                    log.exception("LCD weight update failed")
 
             # Throttle weight broadcasts to ~5 Hz
             if self._on_weight and (t0 - last_broadcast) > 0.2:
@@ -259,6 +379,7 @@ class Pipeline:
     # ------------------------------------------------------------------
 
     def _handle_event(self, weight_g: float) -> None:
+        """Auto-stable or legacy record-now path: capture, detect, save."""
         log.info("Stable placement detected: %.2f g", weight_g)
         frame = self._safe_capture()
         detections = self._safe_detect_all(frame)
@@ -271,9 +392,20 @@ class Pipeline:
             log.info("No recognizable items detected in frame; event skipped.")
             return
 
+        pending = PendingDetection(image_path=image_path or "", detections=detections)
+        self._save_event_from_pending(pending, weight_g)
+
+    def _save_event_from_pending(self, pending: PendingDetection, weight_g: float) -> None:
+        """Persist DB rows and fire callbacks for a completed detection + weight."""
+        if not pending.detections:
+            log.info("No detections in pending record; skipping.")
+            return
+
+        image_path = pending.image_path or None
+
         # Split weight equally among all detected items.
-        weight_per_item = weight_g / len(detections)
-        for detection in detections:
+        weight_per_item = weight_g / len(pending.detections)
+        for detection in pending.detections:
             record = self._db.insert_event(
                 weight_grams=weight_per_item,
                 detected_label=detection.label,

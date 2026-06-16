@@ -1,11 +1,25 @@
-"""Scale interface (ADS1115 voltage reading on channel 1).
+"""Scale interface — RS485 Modbus RTU driver.
+
+Register map (from module datasheet):
+  0–1   Real-time net weight     (Double word, signed 32-bit, little-endian word order)
+  2–3   Stable value hold        (Double word, signed 32-bit, little-endian word order)
+  6     Status flags             (Word — Bit0: steady/stable flag)
+  17    Peeling operation        (Single word — write 1=tare, 2=cancel tare, 3=clear peak)
+  18    Calibration operation    (Single word — write 1=zero cal, 2=weight point cal)
+
+Communication: Modbus RTU, 9600 baud (default), 8 data bits, 1 stop bit, no parity.
+
+Raw integer → grams conversion:
+    grams = (raw_int / 10 ** decimal_places) * unit_to_grams
+
+Example: module calibrated in kg, 2 decimal places → decimal_places=2, unit_to_grams=1000.0
+         module calibrated in grams, 0 decimal places → decimal_places=0, unit_to_grams=1.0
 
 Provides:
-  * :class:`Scale` - abstract interface
-  * :class:`ADS1115Scale` - real driver (Adafruit CircuitPython ADS1x15 lib)
-  * :func:`build_scale` - factory selecting real or mock based on config
-  * :class:`StableEventDetector` - turns a stream of weight samples into
-    discrete "something was placed on the scale" events
+  * :class:`Scale`              – abstract Protocol
+  * :class:`ModbusRTUScale`     – real RS485 Modbus RTU driver (minimalmodbus)
+  * :func:`build_scale`         – factory selecting real or mock based on config
+  * :class:`StableEventDetector`– turns a weight sample stream into placement events
 """
 
 from __future__ import annotations
@@ -20,94 +34,174 @@ from app.utils import get_logger
 
 log = get_logger(__name__)
 
-# Valid PGA gain values accepted by the adafruit_ads1x15 library.
-_VALID_GAINS = [2 / 3, 1, 2, 4, 8, 16]
+# Modbus register addresses (from datasheet)
+_REG_NET_WEIGHT = 0       # Double word (regs 0–1): real-time net weight
+_REG_STABLE_WEIGHT = 2    # Double word (regs 2–3): stable value hold
+_REG_STATUS = 6           # Word: Bit0 = steady/stable flag
+_REG_PEEL = 17            # Single word: peeling / tare operations
+_REG_CALIBRATION = 18     # Single word: calibration operations
+
+_PEEL_TARE = 1            # Write to _REG_PEEL to tare
+_PEEL_CANCEL_TARE = 2     # Write to _REG_PEEL to cancel tare
+_PEEL_CLEAR_PEAK = 3      # Write to _REG_PEEL to clear peak
+
+_CAL_ZERO = 1             # Write to _REG_CALIBRATION for zero calibration
+_CAL_WEIGHT_POINT = 2     # Write to _REG_CALIBRATION for weight point calibration
+
+_STABLE_BIT = 0x0001      # Bit0 of status register
 
 
-def _nearest_gain(value: float) -> float:
-    """Return the ADS1115 gain value closest to *value*."""
-    return min(_VALID_GAINS, key=lambda g: abs(g - value))
+def _combine_registers(low_reg: int, high_reg: int) -> int:
+    """Combine two 16-bit Modbus registers into a signed 32-bit integer.
+
+    The module uses little-endian word order: the lower address register
+    holds the low 16 bits and the higher address register holds the high 16 bits.
+    """
+    raw = (high_reg << 16) | low_reg
+    if raw > 0x7FFFFFFF:  # two's complement for negative weights
+        raw -= 0x100000000
+    return raw
 
 
 class Scale(Protocol):
     """Abstract scale interface."""
 
     def read_grams(self) -> float:
-        """Return current weight in grams (already tared & calibrated)."""
+        """Return current net weight in grams (tare handled by the module)."""
 
     def tare(self, samples: int = 16) -> None:
-        """Capture a new tare offset by averaging ``samples`` raw readings."""
+        """Send a tare (peel) command to the scale module."""
 
     def close(self) -> None:
         """Release hardware resources."""
 
 
 # ----------------------------------------------------------------------------
-# Real ADS1115 driver (Channel 1 / AIN1)
+# Real RS485 Modbus RTU driver
 # ----------------------------------------------------------------------------
 
 
-class ADS1115Scale:
-    """Driver for the ADS1115 16-bit ADC reading voltage on channel 1 (AIN1).
+class ModbusRTUScale:
+    """RS485 Modbus RTU driver for the weight indicator module.
 
-    Uses ``adafruit_ads1x15`` which talks over I2C.  The analogue sensor
-    output (e.g. a load-cell amplifier board) is wired to AIN1 of the
-    ADS1115.  Voltage is converted to grams using a linear calibration:
+    Communicates over a serial RS485 adapter (e.g. USB-to-RS485 dongle or a
+    Raspberry Pi UART with a MAX485 transceiver).
 
-        grams = (voltage_V - tare_offset_V) / calibration_factor_V_per_g
+    The module performs tare, calibration and stability detection internally;
+    this driver simply reads the net weight registers and issues tare commands.
+
+    Args:
+        port:           Serial port path, e.g. ``/dev/ttyUSB0`` or ``COM3``.
+        slave_address:  Modbus slave address of the module (default 1).
+        baud_rate:      Serial baud rate — 9600 / 19200 / 38400 (default 9600).
+        decimal_places: Number of decimal places encoded in the register value.
+                        The raw integer is divided by ``10**decimal_places``.
+        unit_to_grams:  Multiplier to convert from the module's calibrated unit
+                        to grams (1.0 if grams, 1000.0 if kg).
+        timeout:        Modbus reply timeout in seconds (default 1.0).
     """
 
     def __init__(
         self,
         *,
-        i2c_address: int = 0x48,
-        gain: float = 2 / 3,
-        calibration_factor: float = 1.0,
-        tare_offset: float = 0.0,
+        port: str,
+        slave_address: int = 1,
+        baud_rate: int = 9600,
+        decimal_places: int = 0,
+        unit_to_grams: float = 1.0,
+        timeout: float = 1.0,
     ):
-        # Lazy imports so non-Pi machines can import this module.
-        import board  # type: ignore[import-not-found]
-        import busio  # type: ignore[import-not-found]
-        import adafruit_ads1x15.ads1115 as ADS  # type: ignore[import-not-found]
-        from adafruit_ads1x15.ads1x15 import Pin  # type: ignore[import-not-found]
-        from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore[import-not-found]
+        # Lazy import so non-Pi machines can import this module without
+        # minimalmodbus installed (tests use MockScale instead).
+        import minimalmodbus  # type: ignore[import-not-found]
+        import serial  # type: ignore[import-not-found]
 
-        self._i2c = busio.I2C(board.SCL, board.SDA)
-        self._ads = ADS.ADS1115(self._i2c, address=i2c_address)
-        self._ads.gain = _nearest_gain(gain)
-        self._chan = AnalogIn(self._ads, Pin.A0)  # Channel 0 (AIN0)
-        self._calibration_factor = calibration_factor
-        self._tare_offset = tare_offset
+        self._decimal_places = decimal_places
+        self._unit_to_grams = unit_to_grams
 
-    def _read_voltage(self) -> float:
-        return self._chan.voltage
+        instrument = minimalmodbus.Instrument(port, slave_address)
+        instrument.serial.baudrate = baud_rate
+        instrument.serial.bytesize = 8
+        instrument.serial.parity = serial.PARITY_NONE
+        instrument.serial.stopbits = 1
+        instrument.serial.timeout = timeout
+        instrument.mode = minimalmodbus.MODE_RTU
+        instrument.clear_buffers_before_each_transaction = True
+        self._instrument = instrument
 
-    def read_raw_average(self, samples: int = 8) -> float:
-        return sum(self._read_voltage() for _ in range(samples)) / samples
+        log.info(
+            "ModbusRTUScale initialised on %s, slave=%d, baud=%d",
+            port, slave_address, baud_rate,
+        )
 
-    def read_grams(self, samples: int = 4) -> float:
-        """Return current weight in grams, averaged over ``samples`` readings."""
-        voltage = self.read_raw_average(samples)
-        return (voltage - self._tare_offset) / self._calibration_factor
+    def _raw_to_grams(self, raw: int) -> float:
+        return (raw / (10 ** self._decimal_places)) * self._unit_to_grams
 
-    def tare(self, samples: int = 16) -> None:
-        self._tare_offset = self.read_raw_average(samples)
-        log.info("Tare offset set to %.6f V", self._tare_offset)
+    def _read_double_word(self, start_register: int) -> int:
+        """Read two consecutive 16-bit registers and combine into signed 32-bit int."""
+        regs = self._instrument.read_registers(start_register, 2, functioncode=3)
+        return _combine_registers(regs[0], regs[1])
 
-    @property
-    def tare_offset(self) -> float:
-        return self._tare_offset
+    def read_grams(self) -> float:
+        """Return the real-time net weight in grams."""
+        raw = self._read_double_word(_REG_NET_WEIGHT)
+        return self._raw_to_grams(raw)
 
-    @property
-    def calibration_factor(self) -> float:
-        return self._calibration_factor
+    def read_stable_grams(self) -> float:
+        """Return the last stable net weight in grams.
 
-    def set_calibration_factor(self, factor: float) -> None:
-        self._calibration_factor = factor
+        The module only updates this value when the weight reading is stable;
+        it holds the previous stable value while the weight fluctuates.
+        """
+        raw = self._read_double_word(_REG_STABLE_WEIGHT)
+        return self._raw_to_grams(raw)
 
-    def close(self) -> None:  # pragma: no cover - hardware path
+    def is_stable(self) -> bool:
+        """Return True when the module reports a stable/settled reading."""
+        status = self._instrument.read_register(_REG_STATUS, functioncode=3)
+        return bool(status & _STABLE_BIT)
+
+    def tare(self, samples: int = 16) -> None:  # noqa: ARG002 – samples unused
+        """Send a tare (peel) command to the module.
+
+        The module zeros its net weight register and updates the internal tare
+        value.  The ``samples`` parameter is accepted for interface compatibility
+        but is not used (tare is performed by the module, not by averaging).
+        """
+        self._instrument.write_register(_REG_PEEL, _PEEL_TARE, functioncode=6)
+        log.info("Tare command sent to scale module")
+
+    def cancel_tare(self) -> None:
+        """Cancel the most recent tare, restoring the previous tare value."""
+        self._instrument.write_register(_REG_PEEL, _PEEL_CANCEL_TARE, functioncode=6)
+        log.info("Cancel-tare command sent to scale module")
+
+    def zero_calibrate(self) -> None:
+        """Trigger an internal zero-point calibration on the module."""
+        self._instrument.write_register(_REG_CALIBRATION, _CAL_ZERO, functioncode=6)
+        log.info("Zero calibration command sent to scale module")
+
+    def weight_point_calibrate(self, known_weight_raw: int) -> None:
+        """Trigger a weight-point calibration with a known reference weight.
+
+        Args:
+            known_weight_raw: The reference weight expressed as a raw integer
+                              (i.e. already scaled by 10**decimal_places and
+                              divided by unit_to_grams). For example, if the
+                              module is in kg with 2 decimal places, 5 kg is
+                              represented as 500.
+        """
+        # Write the known weight value to registers 8–9 (double word)
+        low_word = known_weight_raw & 0xFFFF
+        high_word = (known_weight_raw >> 16) & 0xFFFF
+        self._instrument.write_registers(_REG_CALIBRATION - 10, [low_word, high_word])  # regs 8–9
+        self._instrument.write_register(_REG_CALIBRATION, _CAL_WEIGHT_POINT, functioncode=6)
+        log.info("Weight-point calibration triggered (raw value=%d)", known_weight_raw)
+
+    def close(self) -> None:
+        """Close the serial port."""
         try:
-            self._i2c.deinit()
+            self._instrument.serial.close()
         except Exception:  # noqa: BLE001
             pass
 
@@ -125,12 +219,17 @@ def build_scale(cfg: AppConfig) -> Scale:
         log.info("Using MockScale (set hardware.use_mock=false to use real hardware)")
         return MockScale()
     sc = cfg.hardware.scale
-    log.info("Initializing ADS1115 at 0x%02X, channel 0", sc.i2c_address)
-    return ADS1115Scale(
-        i2c_address=sc.i2c_address,
-        gain=sc.gain,
-        calibration_factor=sc.calibration_factor,
-        tare_offset=sc.tare_offset,
+    log.info(
+        "Initializing ModbusRTUScale on %s (slave=%d, baud=%d)",
+        sc.port, sc.slave_address, sc.baud_rate,
+    )
+    return ModbusRTUScale(
+        port=sc.port,
+        slave_address=sc.slave_address,
+        baud_rate=sc.baud_rate,
+        decimal_places=sc.decimal_places,
+        unit_to_grams=sc.unit_to_grams,
+        timeout=sc.timeout,
     )
 
 

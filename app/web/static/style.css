@@ -58,6 +58,22 @@ canvas { max-width: 100%; }
 .btn-scan:hover:not(:disabled) { background: #e5e7eb; }
 .btn-scan:disabled { opacity: 0.55; cursor: not-allowed; }
 .record-feedback { margin-top: 0.4rem; font-size: 0.85rem; min-height: 1.2em; text-align: center; }
+/* Two-step Analyze → Record */
+.two-step-wrap { margin-top: 1rem; padding: 0.75rem; border: 1px dashed #d1d5db; border-radius: 0.5rem; background: #f9fafb; }
+.two-step-hint { font-size: 0.78rem; color: #6b7280; margin-bottom: 0.5rem; }
+.two-step-btns { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.btn { padding: 0.55rem 1rem; border: none; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: background 0.2s, opacity 0.2s; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-analyze { background: #2563eb; color: #fff; }
+.btn-analyze:hover:not(:disabled) { background: #1d4ed8; }
+.btn-commit  { background: #16a34a; color: #fff; }
+.btn-commit:hover:not(:disabled)  { background: #15803d; }
+.btn-clear-pending { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+.btn-clear-pending:hover:not(:disabled) { background: #e5e7eb; }
+.pending-preview { margin-top: 0.6rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 0.88rem; }
+.pending-label { font-weight: 700; color: #6b7280; text-transform: uppercase; font-size: 0.75rem; }
+.pending-conf  { color: #6b7280; font-size: 0.8rem; }
+.pending-img   { width: 80px; height: 60px; object-fit: cover; border-radius: 0.35rem; border: 1px solid #e5e7eb; }
 .detection-preview { margin-top: 0.75rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.6rem 0.75rem; background: #f9fafb; }
 .detection-preview-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
 .detection-preview-title { font-size: 0.75rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; }

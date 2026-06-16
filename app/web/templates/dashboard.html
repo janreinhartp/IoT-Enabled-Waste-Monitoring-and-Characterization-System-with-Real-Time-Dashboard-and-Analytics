@@ -17,6 +17,32 @@
     <button id="btn-scan" class="btn-scan" title="See what the AI detects right now without recording">
       🔍 What's here?
     </button>
+
+    {# ---- Two-step Analyze → Record ---- #}
+    <div class="two-step-wrap">
+      <div class="two-step-hint">Two-step mode: Analyze first, then place on scale and Record.</div>
+      <div class="two-step-btns">
+        <button id="btn-analyze" class="btn btn-analyze"
+                title="Step 1 — Point item at camera and capture + detect">
+          🔬 Analyze
+        </button>
+        <button id="btn-commit" class="btn btn-commit" disabled
+                title="Step 2 — Place item on scale, wait for stable weight, then click">
+          ⚖ Record Weight
+        </button>
+        <button id="btn-clear-pending" class="btn btn-clear-pending" style="display:none"
+                title="Discard the pending analysis without recording">
+          ✕ Clear
+        </button>
+      </div>
+      <div id="pending-preview" class="pending-preview" style="display:none">
+        <span class="pending-label">Pending:</span>
+        <span id="pending-label-text"></span>
+        <span id="pending-conf-text" class="pending-conf"></span>
+        <img id="pending-img" src="" alt="pending capture" class="pending-img">
+      </div>
+    </div>
+
     <div id="record-feedback" class="record-feedback"></div>
     <div id="detection-preview" class="detection-preview" style="display:none">
       <div class="detection-preview-header">

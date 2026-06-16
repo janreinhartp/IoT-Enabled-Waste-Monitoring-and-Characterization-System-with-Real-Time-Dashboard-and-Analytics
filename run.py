@@ -18,7 +18,9 @@ from app.ai.detector import build_detector
 from app.config import load_config
 from app.core.db import Database
 from app.core.pipeline import Pipeline
+from app.hardware.button import build_button
 from app.hardware.camera import build_camera
+from app.hardware.lcd import build_lcd
 from app.hardware.scale import build_scale
 from app.utils import setup_logging, get_logger
 
@@ -50,12 +52,16 @@ def main(argv: list[str] | None = None) -> int:
 
     pipeline = None
     camera = None
+    lcd = None
+    button_analyze = None
+    button_record = None
     camera_lock = threading.Lock()
     if not args.no_pipeline:
         log.info("Initializing hardware (use_mock=%s)", cfg.hardware.use_mock)
         scale = build_scale(cfg)
         camera = build_camera(cfg)
         detector = build_detector(cfg)
+        lcd = build_lcd(cfg)
 
     app, socketio = create_app(cfg, db, camera=camera, camera_lock=camera_lock, scale=scale if not args.no_pipeline else None)
 
@@ -67,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             detector=detector,
             db=db,
             camera_lock=camera_lock,
+            lcd=lcd,
             on_event=lambda rec: broadcast_event(socketio, rec.to_dict()),
             on_weight=lambda g: broadcast_weight(socketio, g),
             on_bin_status=lambda full: broadcast_bin_status(app, socketio, full),
@@ -76,10 +83,50 @@ def main(argv: list[str] | None = None) -> int:
         pipeline.start()
         app.config["WASTE_PIPELINE"] = pipeline
 
+        # ---- Analyze button: capture + AI — do NOT save yet ----
+        def _on_analyze_press():
+            log.info("Analyze button pressed")
+            if lcd:
+                lcd.show_message("Analyzing...  ", "Please wait... ")
+            pending = pipeline.analyze_and_hold()
+            if lcd:
+                if pending and pending.top():
+                    top = pending.top()
+                    lcd.show_detection(top.label, top.confidence)
+                else:
+                    lcd.show_message("Nothing       ", "detected       ")
+
+        # ---- Record button: commit pending detection + weight — saves to DB ----
+        def _on_record_press():
+            log.info("Record button pressed — committing pending detection")
+            if lcd:
+                lcd.show_message("Recording...  ", "Please wait... ")
+            ok = pipeline.commit_pending()
+            if not ok and lcd:
+                lcd.show_message("No pending    ", "Press Analyze  ")
+
+        cfg_btn = cfg.hardware
+        button_analyze = build_button(
+            cfg,
+            on_press=_on_analyze_press,
+            config_override=cfg_btn.button_analyze,
+        )
+        button_record = build_button(
+            cfg,
+            on_press=_on_record_press,
+            config_override=cfg_btn.button_record,
+        )
+
     def _shutdown(*_args):
         log.info("Shutting down…")
         if pipeline:
             pipeline.stop()
+        if button_analyze:
+            button_analyze.close()
+        if button_record:
+            button_record.close()
+        if lcd:
+            lcd.close()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)

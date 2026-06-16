@@ -8,16 +8,21 @@ hardware:
   use_mock: true
 
   scale:
-    # ADS1115 I2C address (default 0x48 when ADDR pin tied to GND)
-    i2c_address: 0x48
-    # Calibration factor: volts per gram (V/g). Determined via scripts/calibrate_scale.py
-    calibration_factor: 1.0
-    # Tare offset in volts (subtracted before dividing by calibration_factor)
-    tare_offset: 0.0
-    # ADS1115 PGA gain setting (2/3=±6.144V, 1=±4.096V, 2=±2.048V, 4=±1.024V, 8=±0.512V, 16=±0.256V)
-    # Use 0.6667 (2/3) when powering ADS1115 at 5V to cover the full 0-5V input range.
-    gain: 0.6667
-    # Samples per second the loop will try to read
+    # RS485 serial port — /dev/ttyUSB0 (USB-to-RS485 dongle) or /dev/ttyAMA0 (Pi UART)
+    port: /dev/ttyUSB0
+    # Modbus slave address programmed on the weight indicator module (default 1)
+    slave_address: 1
+    # Baud rate — must match the module setting (9600 / 19200 / 38400)
+    baud_rate: 9600
+    # Decimal places encoded in the register value.
+    # Example: module calibrated in kg, 2 decimal places → raw 1234 = 12.34 kg
+    decimal_places: 0
+    # Multiply (raw / 10^decimal_places) by this to get grams.
+    # Use 1.0 if calibrated in grams, 1000.0 if calibrated in kg.
+    unit_to_grams: 1.0
+    # Modbus reply timeout in seconds
+    timeout: 1.0
+    # Samples per second the pipeline loop will try to read
     sample_rate_hz: 10
 
   camera:
@@ -27,6 +32,37 @@ hardware:
     height: 480
     # JPEG quality for saved images (1-100)
     jpeg_quality: 85
+
+  lcd:
+    # Set to true to enable the I2C LCD display
+    enabled: false
+    # PCF8574 I2C address — 0x27 (most common) or 0x3F
+    i2c_address: 0x27
+    # Display size — 16x2 or 20x4
+    cols: 16
+    rows: 2
+    # I2C bus number (1 on all Raspberry Pi 2/3/4/5)
+    i2c_port: 1
+
+  button_analyze:
+    # Analyze button: runs AI detection and shows result on LCD — does NOT save
+    enabled: false
+    # BCM GPIO pin (other leg to GND). Default: BCM 17 = physical pin 11
+    gpio_pin: 17
+    # Software debounce time in milliseconds
+    debounce_ms: 300
+    # MockButton only: auto-press interval in seconds (0 = disabled)
+    mock_interval_s: 0.0
+
+  button_record:
+    # Record button: captures frame, runs AI, saves event to DB
+    enabled: false
+    # BCM GPIO pin (other leg to GND). Default: BCM 27 = physical pin 13
+    gpio_pin: 27
+    # Software debounce time in milliseconds
+    debounce_ms: 300
+    # MockButton only: auto-press interval in seconds (0 = disabled)
+    mock_interval_s: 0.0
 
 # ---- Event detection (stable placement) ----
 events:

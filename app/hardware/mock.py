@@ -55,17 +55,15 @@ class MockScale:
             noise = random.uniform(-0.15, 0.15)
             return max(0.0, self._weight + noise)
 
-    def read_raw_average(self, samples: int = 8) -> float:
-        """Mock raw voltage – always returns 0.0 (calibration needs real hardware)."""
-        return 0.0
-
-    def tare(self, samples: int = 16) -> None:
+    def tare(self, samples: int = 16) -> None:  # noqa: ARG002
+        """Mock tare – resets the simulated weight to zero."""
         with self._lock:
             self._weight = 0.0
             self._target = 0.0
 
     def close(self) -> None:
-        return
+        """No-op for mock hardware."""
+        pass
 
 
 class MockCamera:

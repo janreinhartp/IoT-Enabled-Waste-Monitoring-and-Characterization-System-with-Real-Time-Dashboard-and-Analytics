@@ -206,6 +206,98 @@
     btnScan.addEventListener("click", () => runScan(false));
   }
 
+  // ---- Two-step Analyze → Record ----
+  const btnAnalyze     = document.getElementById("btn-analyze");
+  const btnCommit      = document.getElementById("btn-commit");
+  const btnClearPend   = document.getElementById("btn-clear-pending");
+  const pendingPreview = document.getElementById("pending-preview");
+  const pendingLabelEl = document.getElementById("pending-label-text");
+  const pendingConfEl  = document.getElementById("pending-conf-text");
+  const pendingImgEl   = document.getElementById("pending-img");
+
+  function setPendingUI(pending) {
+    if (!btnCommit) return;
+    if (pending && pending.pending) {
+      btnCommit.disabled = false;
+      if (btnClearPend) btnClearPend.style.display = "";
+      if (pendingPreview) pendingPreview.style.display = "";
+      if (pendingLabelEl) pendingLabelEl.textContent = pending.label || "unknown";
+      if (pendingConfEl) pendingConfEl.textContent =
+        pending.confidence != null ? "(" + Math.round(pending.confidence * 100) + "%)" : "";
+      if (pendingImgEl && pending.image_path) {
+        pendingImgEl.src = "/" + pending.image_path + "?t=" + Date.now();
+        pendingImgEl.style.display = "";
+      }
+    } else {
+      btnCommit.disabled = true;
+      if (btnClearPend) btnClearPend.style.display = "none";
+      if (pendingPreview) pendingPreview.style.display = "none";
+    }
+  }
+
+  // Restore pending state on page load
+  fetch("/api/pending_detection")
+    .then((r) => r.json())
+    .then(setPendingUI)
+    .catch(() => {});
+
+  if (btnAnalyze) {
+    btnAnalyze.addEventListener("click", () => {
+      btnAnalyze.disabled = true;
+      btnAnalyze.textContent = "Analyzing…";
+      setFeedback("", true);
+      fetch("/api/analyze", { method: "POST" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.error) { setFeedback("Error: " + data.error, false); return; }
+          if (data.status === "no_detection") {
+            setFeedback("Nothing detected — try again.", false);
+            setPendingUI({ pending: false });
+          } else {
+            setFeedback("Item analyzed: " + data.label + ". Now place on scale and click Record Weight.", true);
+            setPendingUI({ pending: true, ...data });
+          }
+        })
+        .catch(() => setFeedback("Analyze request failed.", false))
+        .finally(() => {
+          btnAnalyze.disabled = false;
+          btnAnalyze.textContent = "🔬 Analyze";
+        });
+    });
+  }
+
+  if (btnCommit) {
+    btnCommit.addEventListener("click", () => {
+      btnCommit.disabled = true;
+      btnCommit.textContent = "Recording…";
+      setFeedback("", true);
+      fetch("/api/commit", { method: "POST" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.error) {
+            setFeedback("Error: " + data.error, false);
+            btnCommit.disabled = false;
+          } else {
+            setFeedback("Recorded at " + data.weight_g + " g ✓", true);
+            setPendingUI({ pending: false });
+          }
+        })
+        .catch(() => {
+          setFeedback("Commit request failed.", false);
+          btnCommit.disabled = false;
+        })
+        .finally(() => { btnCommit.textContent = "⚖ Record Weight"; });
+    });
+  }
+
+  if (btnClearPend) {
+    btnClearPend.addEventListener("click", () => {
+      fetch("/api/commit", { method: "DELETE" }).catch(() => {});  // best-effort
+      setPendingUI({ pending: false });
+      setFeedback("Pending analysis cleared.", true);
+    });
+  }
+
   // ---- Live AI preview via Socket.IO (pushed every ai_preview_interval_s) ----
   const aiLiveDot = document.getElementById("ai-live-dot");
   const aiLastUpdated = document.getElementById("ai-last-updated");

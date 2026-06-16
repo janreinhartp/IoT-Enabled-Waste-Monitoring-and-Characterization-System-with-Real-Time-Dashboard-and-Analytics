@@ -16,11 +16,47 @@ import yaml
 
 @dataclass
 class ScaleConfig:
-    i2c_address: int = 0x48
-    calibration_factor: float = 1.0
-    tare_offset: float = 0.0
-    gain: float = 2 / 3  # 2/3 = ±6.144V PGA; covers full 0–5V range
+    # RS485 serial port (e.g. /dev/ttyUSB0 on Linux, COM3 on Windows)
+    port: str = "/dev/ttyUSB0"
+    # Modbus slave address of the weight indicator module
+    slave_address: int = 1
+    # Baud rate — module supports 9600, 19200, 38400
+    baud_rate: int = 9600
+    # Decimal places encoded in the register value.
+    # The raw integer is divided by 10**decimal_places before applying unit_to_grams.
+    decimal_places: int = 0
+    # Multiplier from the module's calibrated unit to grams.
+    # Use 1.0 if the module is calibrated in grams, 1000.0 if in kg.
+    unit_to_grams: float = 1.0
+    # Modbus reply timeout in seconds
+    timeout: float = 1.0
+    # Samples per second the pipeline loop will try to read
     sample_rate_hz: int = 10
+
+
+@dataclass
+class ButtonConfig:
+    # Set to true to enable this button
+    enabled: bool = False
+    # BCM GPIO pin number (other leg of the button connects to GND)
+    gpio_pin: int = 17
+    # Software debounce time in milliseconds
+    debounce_ms: int = 300
+    # MockButton only: seconds between simulated presses (0 = disabled)
+    mock_interval_s: float = 0.0
+
+
+@dataclass
+class LCDConfig:
+    # Set to true to enable the I2C LCD display
+    enabled: bool = False
+    # PCF8574 I2C address (0x27 is the most common default; 0x3F on some modules)
+    i2c_address: int = 0x27
+    # Display dimensions — common options: 16x2 or 20x4
+    cols: int = 16
+    rows: int = 2
+    # I2C bus number (1 on all Raspberry Pi 2/3/4/5)
+    i2c_port: int = 1
 
 
 @dataclass
@@ -36,6 +72,9 @@ class HardwareConfig:
     use_mock: bool = True
     scale: ScaleConfig = field(default_factory=ScaleConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
+    lcd: LCDConfig = field(default_factory=LCDConfig)
+    button_analyze: ButtonConfig = field(default_factory=lambda: ButtonConfig(gpio_pin=17))
+    button_record: ButtonConfig = field(default_factory=lambda: ButtonConfig(gpio_pin=27))
 
 
 @dataclass
@@ -112,45 +151,7 @@ def _merge(dc_cls, data: Dict[str, Any]):
     return dc_cls(**kwargs)
 
 
-def save_scale_calibration(
-    tare_offset: float,
-    calibration_factor: float,
-    config_path: str | os.PathLike = "config.yaml",
-) -> None:
-    """Update tare_offset and calibration_factor in-place in config.yaml.
 
-    Uses regex substitution so that all other settings and comments are
-    preserved exactly as written.
-    """
-    import re
-
-    p = Path(config_path)
-    if p.is_file():
-        text = p.read_text(encoding="utf-8")
-        text = re.sub(
-            r"^(\s+tare_offset:\s*).*$",
-            lambda m: f"{m.group(1)}{tare_offset}",
-            text,
-            flags=re.MULTILINE,
-        )
-        text = re.sub(
-            r"^(\s+calibration_factor:\s*).*$",
-            lambda m: f"{m.group(1)}{calibration_factor}",
-            text,
-            flags=re.MULTILINE,
-        )
-        p.write_text(text, encoding="utf-8")
-    else:
-        data: Dict[str, Any] = {
-            "hardware": {
-                "scale": {
-                    "tare_offset": tare_offset,
-                    "calibration_factor": calibration_factor,
-                }
-            }
-        }
-        with p.open("w", encoding="utf-8") as fp:
-            yaml.dump(data, fp, default_flow_style=False, allow_unicode=True)
 
 
 def load_config(path: str | os.PathLike | None = None) -> AppConfig:
