@@ -9,10 +9,12 @@ hardware:
 
   scale:
     # RS485 serial port — /dev/ttyUSB0 (USB-to-RS485 dongle) or /dev/ttyAMA0 (Pi UART)
+    # Ignored when 'host' is set below (TCP/Ethernet mode).
     port: /dev/ttyUSB0
     # Modbus slave address programmed on the weight indicator module (default 1)
     slave_address: 1
-    # Baud rate — must match the module setting (9600 / 19200 / 38400)
+    # Baud rate — must match the module setting (9600 / 19200 / 38400).
+    # In TCP mode this is configured on the gateway web UI instead.
     baud_rate: 9600
     # Decimal places encoded in the register value.
     # Example: module calibrated in kg, 2 decimal places → raw 1234 = 12.34 kg
@@ -24,6 +26,13 @@ hardware:
     timeout: 1.0
     # Samples per second the pipeline loop will try to read
     sample_rate_hz: 10
+    # ---- Ethernet / TCP mode (Waveshare RS485 TO ETH (B) or similar) ----
+    # Set 'host' to the gateway's IP to use Modbus TCP instead of serial RTU.
+    # Leave as empty string ("") to use the serial RS485 driver above.
+    # Example: host: "192.168.1.200"
+    host: ""
+    # TCP port — use 502 when the gateway is in Modbus TCP↔RTU mode (recommended).
+    tcp_port: 502
 
   camera:
     # OpenCV camera index (0 = first USB camera)

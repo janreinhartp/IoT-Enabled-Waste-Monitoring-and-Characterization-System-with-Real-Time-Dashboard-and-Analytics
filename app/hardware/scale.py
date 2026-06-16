@@ -199,6 +199,151 @@ class ModbusRTUScale:
         log.info("Weight-point calibration triggered (raw value=%d)", known_weight_raw)
 
     def close(self) -> None:
+        """Release the serial port."""
+        try:
+            self._instrument.serial.close()
+        except Exception:  # noqa: BLE001
+            pass
+        log.info("ModbusRTUScale serial port closed")
+
+
+# ----------------------------------------------------------------------------
+# Modbus TCP driver (Waveshare RS485 TO ETH (B) or similar gateway)
+# ----------------------------------------------------------------------------
+
+
+class ModbusTCPScale:
+    """Modbus TCP driver for the weight indicator module.
+
+    Use this instead of :class:`ModbusRTUScale` when the RS485 bus is bridged
+    to Ethernet via a gateway such as the **Waveshare RS485 TO ETH (B)**.
+    The gateway must be configured in **Modbus TCP ↔ RTU** mode (port 502).
+
+    The Pi no longer needs a UART or TTL↔RS485 adapter — it talks to the
+    gateway over the same Ethernet/Wi-Fi network as the dashboard.
+
+    Args:
+        host:           IP address of the RS485-to-Ethernet gateway
+                        (e.g. ``"192.168.1.200"``).
+        tcp_port:       TCP port — 502 in Modbus TCP↔RTU mode (recommended).
+        slave_address:  Modbus slave address of the weight indicator (default 1).
+        decimal_places: Decimal places encoded in the register value.
+        unit_to_grams:  Multiplier from module unit to grams.
+        timeout:        Modbus reply timeout in seconds (default 1.0).
+    """
+
+    def __init__(
+        self,
+        *,
+        host: str,
+        tcp_port: int = 502,
+        slave_address: int = 1,
+        decimal_places: int = 0,
+        unit_to_grams: float = 1.0,
+        timeout: float = 1.0,
+    ):
+        # Lazy import — pymodbus is optional; serial-only deployments don't need it.
+        from pymodbus.client import ModbusTcpClient  # type: ignore[import-not-found]
+
+        self._slave = slave_address
+        self._decimal_places = decimal_places
+        self._unit_to_grams = unit_to_grams
+
+        self._client = ModbusTcpClient(host=host, port=tcp_port, timeout=timeout)
+        if not self._client.connect():
+            raise ConnectionError(
+                f"Cannot connect to Modbus TCP gateway at {host}:{tcp_port}. "
+                "Check that the Waveshare module is powered, the Ethernet cable is "
+                "plugged in, and the gateway IP/port match config.yaml."
+            )
+
+        log.info(
+            "ModbusTCPScale connected to %s:%d (slave=%d)",
+            host, tcp_port, slave_address,
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _raw_to_grams(self, raw: int) -> float:
+        return (raw / (10 ** self._decimal_places)) * self._unit_to_grams
+
+    def _read_double_word(self, start_register: int) -> int:
+        """Read two consecutive 16-bit registers and combine into a signed 32-bit int."""
+        result = self._client.read_holding_registers(
+            address=start_register, count=2, slave=self._slave
+        )
+        if result.isError():
+            raise IOError(
+                f"Modbus TCP read error at register {start_register}: {result}"
+            )
+        return _combine_registers(result.registers[0], result.registers[1])
+
+    # ------------------------------------------------------------------
+    # Scale Protocol implementation
+    # ------------------------------------------------------------------
+
+    def read_grams(self) -> float:
+        """Return the real-time net weight in grams."""
+        raw = self._read_double_word(_REG_NET_WEIGHT)
+        return self._raw_to_grams(raw)
+
+    def read_stable_grams(self) -> float:
+        """Return the last stable net weight in grams."""
+        raw = self._read_double_word(_REG_STABLE_WEIGHT)
+        return self._raw_to_grams(raw)
+
+    def is_stable(self) -> bool:
+        """Return True when the module reports a stable/settled reading."""
+        result = self._client.read_holding_registers(
+            address=_REG_STATUS, count=1, slave=self._slave
+        )
+        if result.isError():
+            return False
+        return bool(result.registers[0] & _STABLE_BIT)
+
+    def tare(self, samples: int = 16) -> None:  # noqa: ARG002
+        """Send a tare command to the module."""
+        self._client.write_register(
+            address=_REG_PEEL, value=_PEEL_TARE, slave=self._slave
+        )
+        log.info("Tare command sent to scale module (TCP)")
+
+    def cancel_tare(self) -> None:
+        """Cancel the most recent tare."""
+        self._client.write_register(
+            address=_REG_PEEL, value=_PEEL_CANCEL_TARE, slave=self._slave
+        )
+        log.info("Cancel-tare command sent to scale module (TCP)")
+
+    def zero_calibrate(self) -> None:
+        """Trigger zero-point calibration on the module."""
+        self._client.write_register(
+            address=_REG_CALIBRATION, value=_CAL_ZERO, slave=self._slave
+        )
+        log.info("Zero calibration command sent to scale module (TCP)")
+
+    def weight_point_calibrate(self, known_weight_raw: int) -> None:
+        """Trigger weight-point calibration with a known reference weight."""
+        low_word = known_weight_raw & 0xFFFF
+        high_word = (known_weight_raw >> 16) & 0xFFFF
+        self._client.write_registers(
+            address=_REG_CALIBRATION - 10, values=[low_word, high_word], slave=self._slave
+        )
+        self._client.write_register(
+            address=_REG_CALIBRATION, value=_CAL_WEIGHT_POINT, slave=self._slave
+        )
+        log.info(
+            "Weight-point calibration triggered via TCP (raw value=%d)", known_weight_raw
+        )
+
+    def close(self) -> None:
+        """Close the TCP connection."""
+        self._client.close()
+        log.info("ModbusTCPScale TCP connection closed")
+
+    def close(self) -> None:
         """Close the serial port."""
         try:
             self._instrument.serial.close()
@@ -219,6 +364,19 @@ def build_scale(cfg: AppConfig) -> Scale:
         log.info("Using MockScale (set hardware.use_mock=false to use real hardware)")
         return MockScale()
     sc = cfg.hardware.scale
+    if sc.host:
+        log.info(
+            "Initializing ModbusTCPScale → %s:%d (slave=%d)",
+            sc.host, sc.tcp_port, sc.slave_address,
+        )
+        return ModbusTCPScale(
+            host=sc.host,
+            tcp_port=sc.tcp_port,
+            slave_address=sc.slave_address,
+            decimal_places=sc.decimal_places,
+            unit_to_grams=sc.unit_to_grams,
+            timeout=sc.timeout,
+        )
     log.info(
         "Initializing ModbusRTUScale on %s (slave=%d, baud=%d)",
         sc.port, sc.slave_address, sc.baud_rate,

@@ -10,7 +10,9 @@ An IoT system that **weighs** an item placed on a load-cell scale, **identifies*
 | Load cells | 4 | Wired to the junction box to form a single Wheatstone bridge. |
 | Load cell junction box | 1 | Combines the 4 load cells into E+/E−/S+/S− outputs. |
 | RS485 Modbus RTU weight indicator module | 1 | Powered by 10–28 V DC. Reads the load cell bridge directly. Communicates over RS485 Modbus RTU at 9600 baud. |
-| Feiyang TTL-to-RS485 module | 1 | Converts Pi 3.3 V UART (TXD/RXD) to RS485 differential pair (A+/B−). Auto direction control — no DE/RE pin needed. |
+| Feiyang TTL-to-RS485 module *(option A)* | 1 | Converts Pi 3.3 V UART (TXD/RXD) to RS485 differential pair (A+/B−). Auto direction control — no DE/RE pin needed. |
+| **— OR —** | | |
+| Waveshare RS485 TO ETH (B) *(option B)* | 1 | Bridges the RS485 bus to Ethernet in Modbus TCP↔RTU gateway mode. Powered by 9–24 V DC. No UART wiring to the Pi required — communicates over the LAN. |
 | I2C LCD display (HD44780) | 1 | 16×2 or 20×4 character LCD with PCF8574 I2C backpack. Displays live weight + AI detection. |
 | Push button × 2 | 2 | **Analyze** (GPIO 17) and **Record** (GPIO 27). Normally-open, wired to GND. Internal pull-up enabled via RPi.GPIO. |
 | Buck converter (12 V → 5 V) | 1 | Steps down the 12 V supply to 5 V for the Pi. |
@@ -19,6 +21,252 @@ An IoT system that **weighs** an item placed on a load-cell scale, **identifies*
 | Router | 1 | Pi connects via Ethernet for network access. |
 
 Enable the Pi hardware UART — see [step 1a below](#1a--enable-uart).
+
+---
+
+## Wiring Diagram
+
+### Power supply chain
+
+```
+12 V DC PSU (≥ 3 A)
+├── 12 V ──────────────────────────────── Weight Indicator Module (10–28 V DC input)
+└── 12 V ──→ Buck Converter (12 V → 5 V) ──→ Raspberry Pi 5 V
+                                               (USB-C on Pi 4/5, or GPIO Pin 2/4)
+```
+
+---
+
+### Load cells → Junction box → Weight indicator
+
+```
+Load Cell 1 ──┐
+Load Cell 2 ──┤                     ┌── E+ ──→ Weight Indicator E+
+Load Cell 3 ──┤  Junction Box  ─────┤── E− ──→ Weight Indicator E−
+Load Cell 4 ──┘  (Wheatstone        ├── S+ ──→ Weight Indicator S+
+                  bridge)           └── S− ──→ Weight Indicator S−
+```
+
+---
+
+### RS485 / Modbus RTU chain: Weight indicator → Feiyang module → Pi UART
+
+```
+Weight Indicator          Feiyang TTL↔RS485 Module       Raspberry Pi
+─────────────────         ────────────────────────        ─────────────────────
+RS485 A+ ─────────────── A+                    VCC ─────── Pin  1  (3.3 V)
+RS485 B− ─────────────── B−                    GND ─────── Pin  6  (GND)
+                                               TXD ─────── Pin 10  (GPIO 15 / RXD)
+                                               RXD ─────── Pin  8  (GPIO 14 / TXD)
+```
+
+> Auto direction-control — **no DE/RE pin** required.
+> Use `/dev/ttyAMA0` (or `/dev/ttyS0` — see step 1a) in `config.yaml`.
+
+---
+
+### I²C LCD display (HD44780 + PCF8574 backpack)
+
+```
+LCD Backpack (PCF8574)    Raspberry Pi
+──────────────────────    ─────────────────────
+VCC ─────────────────────── Pin  2  (5 V)
+GND ─────────────────────── Pin  6  (GND)
+SDA ─────────────────────── Pin  3  (GPIO 2 / SDA1)
+SCL ─────────────────────── Pin  5  (GPIO 3 / SCL1)
+```
+
+> Default I²C address: `0x27`. Run `i2cdetect -y 1` to confirm (`0x3F` on some backpacks).
+
+---
+
+### GPIO push buttons
+
+```
+Raspberry Pi                      Button          Rail
+────────────────────────────────────────────────────────
+Pin 11  (GPIO 17) ──┬── [ Analyze button ] ──── GND
+                    └── internal pull-up (active LOW on press)
+
+Pin 13  (GPIO 27) ──┬── [ Record button  ] ──── GND
+                    └── internal pull-up (active LOW on press)
+```
+
+> No external resistor needed — pull-ups are enabled in software via `RPi.GPIO`.
+> Any adjacent GND pin (e.g. Pin 9, Pin 14) works for the button return.
+
+---
+
+### USB camera
+
+Plug into any available USB port on the Raspberry Pi.
+
+---
+
+### GPIO summary (all connections at a glance)
+
+```
+Pi Physical Pin   BCM GPIO    Function                      Connected to
+───────────────   ─────────   ───────────────────────────   ────────────────────────────
+Pin  1            —           3.3 V power                   Feiyang VCC
+Pin  2            —           5 V power                     LCD backpack VCC
+Pin  3            GPIO  2     I²C SDA1                      LCD backpack SDA
+Pin  5            GPIO  3     I²C SCL1                      LCD backpack SCL
+Pin  6            —           GND                           Feiyang GND / LCD GND
+Pin  8            GPIO 14     UART TXD  (→ RS485)           Feiyang RXD
+Pin  9            —           GND                           Analyze button (return)
+Pin 10            GPIO 15     UART RXD  (← RS485)           Feiyang TXD
+Pin 11            GPIO 17     Analyze button (pull-up)      Button → GND
+Pin 13            GPIO 27     Record button  (pull-up)      Button → GND
+Pin 14            —           GND                           Record button (return)
+USB ports         —           USB                           Camera (any USB port)
+```
+
+---
+
+## Alternative: Waveshare RS485 TO ETH (B) — Scale over Ethernet
+
+Instead of the Feiyang TTL↔RS485 module wired to the Pi's UART pins, you can use the **[Waveshare RS485 TO ETH (B)](https://www.waveshare.com/wiki/RS485_TO_ETH_(B))** to bridge the weight indicator's RS485 bus onto your LAN. The Pi then reads the scale over Ethernet/Wi-Fi — no UART wiring to the Pi at all.
+
+```
+12 V PSU ──── Waveshare RS485 TO ETH (B) ──── Ethernet ──── Router ──── Pi (same LAN)
+                  │                                              │
+              RS485 A+/B−                             Flask dashboard
+                  │
+          Weight Indicator Module (Modbus RTU slave)
+```
+
+**What changes vs. the default UART wiring:**
+
+| | Default (Feiyang + UART) | This alternative (Waveshare ETH) |
+|---|---|---|
+| Scale ↔ Pi path | RS485 → Feiyang module → GPIO UART pins | RS485 → Waveshare gateway → LAN → Pi |
+| Pi pins used | GPIO 14 (TXD), GPIO 15 (RXD) + 3.3 V, GND | None (LAN only) |
+| Protocol on Pi | Modbus RTU over serial (`minimalmodbus`) | Modbus TCP over socket (`pymodbus`) |
+| UART enable required | Yes | No |
+| Pi location constraint | Must be physically close to scale | Can be anywhere on the same network |
+
+---
+
+### Hardware wiring
+
+```
+12 V DC PSU ─────────────────────────────── Waveshare V+ terminal
+            └── also powers Weight Indicator and Buck converter → Pi
+
+Weight Indicator RS485 A+ ──────────────── Waveshare 485A terminal
+Weight Indicator RS485 B− ──────────────── Waveshare 485B terminal
+
+Waveshare RJ45 ─── Ethernet cable ─── Router / switch
+                                           │
+                                     Pi (Ethernet or Wi-Fi, same LAN)
+```
+
+> The Pi's GPIO UART pins (8/10) and the Feiyang module are no longer needed and can be left unconnected.
+
+---
+
+### Configure the Waveshare gateway
+
+1. **Power it on** and connect it to your router with an Ethernet cable.
+
+2. **Find its IP** — open a browser to `http://192.168.1.200` (factory default).  
+   If that doesn't work, use the [VirCom tool](https://files.waveshare.com/upload/4/42/VirCom_en.rar) (Windows) to scan your network and find the device.
+
+3. **Set a static IP** so it always has the same address (recommended):
+   - In the web UI, change *IP Address* to e.g. `192.168.1.200`, *Subnet Mask* `255.255.255.0`, *Gateway* to your router IP.
+   - Disable DHCP.
+
+4. **Configure the serial port settings** to match the weight indicator:
+   - Baud Rate: `9600`
+   - Data Bits: `8`
+   - Stop Bits: `1`
+   - Parity: `None`
+
+5. **Switch to Modbus TCP ↔ RTU mode**:
+   - Under *Protocol*, select **Modbus TCP ↔ RTU**.
+   - The port number changes to `502` automatically (standard Modbus TCP port).
+
+6. Click **Submit Modification** and wait for the device to restart.
+
+7. **Verify** from the Pi (or any machine on the LAN):
+
+   ```bash
+   python3 -c "
+   from pymodbus.client import ModbusTcpClient
+   c = ModbusTcpClient('192.168.1.200', port=502, timeout=2)
+   c.connect()
+   r = c.read_holding_registers(address=0, count=2, slave=1)
+   print('Net weight regs:', r.registers)
+   c.close()
+   "
+   ```
+
+   You should see two integers printed. If you get an error, check the A+/B− polarity and confirm the weight indicator is powered.
+
+---
+
+### config.yaml changes
+
+Open `config.yaml` and update the `scale:` section:
+
+```yaml
+hardware:
+  use_mock: false
+
+  scale:
+    # Leave port/baud_rate as-is — they are ignored in TCP mode.
+    host: "192.168.1.200"   # ← IP of the Waveshare gateway
+    tcp_port: 502            # ← 502 = Modbus TCP↔RTU mode
+    slave_address: 1
+    decimal_places: 0
+    unit_to_grams: 1.0
+    timeout: 1.0
+    sample_rate_hz: 10
+```
+
+The `port` and `baud_rate` fields are ignored whenever `host` is non-empty — the system automatically selects the TCP driver.
+
+---
+
+### Install the extra dependency
+
+```bash
+pip install -r requirements.txt   # pymodbus is already listed here
+```
+
+---
+
+### Calibrating the scale in TCP mode
+
+The calibration script automatically uses the same TCP driver when `host` is set in `config.yaml`:
+
+```bash
+python -m scripts.calibrate_scale --known-weight 500
+```
+
+---
+
+### Updated GPIO summary (Waveshare ETH mode)
+
+```
+Pi Physical Pin   BCM GPIO    Function                  Connected to
+───────────────   ─────────   ───────────────────────   ────────────────────────────
+Pin  2            —           5 V power                 LCD backpack VCC
+Pin  3            GPIO  2     I²C SDA1                  LCD backpack SDA
+Pin  5            GPIO  3     I²C SCL1                  LCD backpack SCL
+Pin  6            —           GND                       LCD GND
+Pin  9            —           GND                       Analyze button (return)
+Pin 11            GPIO 17     Analyze button (pull-up)  Button → GND
+Pin 13            GPIO 27     Record button  (pull-up)  Button → GND
+Pin 14            —           GND                       Record button (return)
+USB ports         —           USB                       Camera (any USB port)
+RJ45              —           Ethernet                  Router / switch
+```
+
+> GPIO 14/15 (UART), Pin 1 (3.3 V), and the Feiyang module are no longer used.
+
+---
 
 ## Architecture
 
@@ -109,7 +357,7 @@ Background loops (always running):
 ├── app/
 │   ├── config.py                # YAML config loader — ScaleConfig, LCDConfig, ButtonConfig
 │   ├── hardware/
-│   │   ├── scale.py             # ModbusRTUScale driver (replaces ADS1115)
+│   │   ├── scale.py             # ModbusRTUScale / ModbusTCPScale drivers
 │   │   ├── camera.py            # USB camera driver
 │   │   ├── lcd.py               # I2CLCD / MockLCD — HD44780 over PCF8574 I2C backpack
 │   │   ├── button.py            # ButtonWatcher / MockButton — GPIO edge detection
@@ -655,13 +903,15 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full annot
 | Key | Default | Description |
 |---|---|---|
 | `hardware.use_mock` | `true` | `false` to use real RS485 scale + USB camera |
-| `hardware.scale.port` | `/dev/ttyUSB0` | Serial port for the RS485 adapter. Use `/dev/ttyAMA0` (Pi UART via GPIO) or `/dev/ttyS0` |
+| `hardware.scale.port` | `/dev/ttyUSB0` | Serial port for the RS485 adapter. Use `/dev/ttyAMA0` (Pi UART via GPIO) or `/dev/ttyS0`. Ignored when `host` is set. |
 | `hardware.scale.slave_address` | `1` | Modbus slave address programmed on the weight indicator module |
-| `hardware.scale.baud_rate` | `9600` | Must match the module setting — supports 9600 / 19200 / 38400 |
+| `hardware.scale.baud_rate` | `9600` | Must match the module setting — supports 9600 / 19200 / 38400. Ignored when `host` is set. |
 | `hardware.scale.decimal_places` | `0` | Decimal places encoded in the register value. Raw integer ÷ 10ⁿ before applying `unit_to_grams` |
 | `hardware.scale.unit_to_grams` | `1.0` | Multiply (raw / 10^decimal_places) by this to get grams. Use `1000.0` if module is calibrated in kg |
 | `hardware.scale.timeout` | `1.0` | Modbus reply timeout in seconds |
 | `hardware.scale.sample_rate_hz` | `10` | Target polling rate |
+| `hardware.scale.host` | `""` | IP address of an RS485-to-Ethernet gateway (e.g. Waveshare RS485 TO ETH (B)). When non-empty, uses Modbus TCP instead of serial RTU. |
+| `hardware.scale.tcp_port` | `502` | TCP port of the gateway. Use `502` in Modbus TCP↔RTU mode, `4196` for raw transparent TCP. |
 | `hardware.lcd.enabled` | `false` | `true` to enable the I²C LCD display |
 | `hardware.lcd.i2c_address` | `0x27` | PCF8574 backpack I²C address (use `i2cdetect -y 1` to confirm) |
 | `hardware.lcd.cols` | `16` | Number of character columns (16 or 20) |

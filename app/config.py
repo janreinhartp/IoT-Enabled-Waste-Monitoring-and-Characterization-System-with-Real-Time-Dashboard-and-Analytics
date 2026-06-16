@@ -16,11 +16,14 @@ import yaml
 
 @dataclass
 class ScaleConfig:
-    # RS485 serial port (e.g. /dev/ttyUSB0 on Linux, COM3 on Windows)
+    # RS485 serial port (e.g. /dev/ttyUSB0 on Linux, COM3 on Windows).
+    # Ignored when host is set (TCP mode).
     port: str = "/dev/ttyUSB0"
     # Modbus slave address of the weight indicator module
     slave_address: int = 1
-    # Baud rate — module supports 9600, 19200, 38400
+    # Baud rate — module supports 9600, 19200, 38400.
+    # Ignored when host is set (TCP mode); the baud rate is instead configured
+    # on the RS485-to-Ethernet gateway itself (e.g. Waveshare RS485 TO ETH (B)).
     baud_rate: int = 9600
     # Decimal places encoded in the register value.
     # The raw integer is divided by 10**decimal_places before applying unit_to_grams.
@@ -32,6 +35,13 @@ class ScaleConfig:
     timeout: float = 1.0
     # Samples per second the pipeline loop will try to read
     sample_rate_hz: int = 10
+    # --- TCP / Ethernet mode (Waveshare RS485 TO ETH (B) or similar gateway) ---
+    # Set host to the gateway IP to use Modbus TCP instead of serial RTU.
+    # Leave empty ("") to use the serial RS485 driver above.
+    host: str = ""
+    # TCP port of the gateway. Use 502 when the gateway is in Modbus TCP↔RTU mode
+    # (recommended). Use 4196 for raw transparent TCP mode.
+    tcp_port: int = 502
 
 
 @dataclass

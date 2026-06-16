@@ -9,9 +9,11 @@ PyYAML>=6.0,<7.0
 numpy>=1.26
 Pillow>=10.0
 opencv-python>=4.8
-# RS485 Modbus RTU scale communication
+# RS485 Modbus RTU scale communication (serial / UART path)
 minimalmodbus>=2.1
 pyserial>=3.5
+# RS485 Modbus TCP scale communication (Waveshare RS485 TO ETH (B) or similar gateway)
+pymodbus>=3.6
 
 # Testing
 pytest>=8.0
