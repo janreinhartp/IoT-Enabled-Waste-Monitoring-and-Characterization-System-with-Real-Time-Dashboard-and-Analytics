@@ -415,6 +415,22 @@ Open <http://localhost:5000>. The mock scale simulates items being placed and re
 
 ## Running on the Raspberry Pi
 
+### 0 — Clone the repository
+
+SSH into the Pi and clone the project. The active development branch is `feature/rs485-modbus-scale`:
+
+```bash
+git clone -b feature/rs485-modbus-scale \
+  https://github.com/janreinhartp/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics.git
+cd IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics
+```
+
+> **Already cloned on `main`?** Switch to the feature branch:
+> ```bash
+> git fetch origin
+> git checkout feature/rs485-modbus-scale
+> ```
+
 ### 1 — System packages
 
 ```bash
@@ -631,7 +647,7 @@ This prints something like `192.168.1.105`. Use that number.
 |---|---|
 | On the Pi itself | `http://localhost:5000` |
 | On another device (phone, laptop) on the same Wi-Fi | `http://192.168.1.105:5000` *(use your actual IP from `hostname -I`)* |
-| Using hostname (after mDNS setup) | `http://Waste-Monitoring.local:5000` |
+| Using hostname (after mDNS setup) | `http://waste-monitoring-v2.local:5000` |
 
 > **Tip:** To keep the server running after you close the terminal, see
 > [Auto-start on boot](#auto-start-on-boot-systemd) or run it with `nohup python run.py &`.
@@ -640,13 +656,13 @@ This prints something like `192.168.1.105`. Use that number.
 
 ## Accessing by Hostname (mDNS / .local)
 
-Instead of typing an IP address, you can give the Pi a memorable hostname reachable as `http://Waste-Monitoring.local:5000` from any device on the same network — no internet required, works over both Wi-Fi and Ethernet.
+Instead of typing an IP address, you can give the Pi a memorable hostname reachable as `http://waste-monitoring-v2.local:5000` from any device on the same network — no internet required, works over both Wi-Fi and Ethernet.
 
 ### 1 — Install Avahi and set the hostname
 
 ```bash
 sudo apt install -y avahi-daemon
-sudo hostnamectl set-hostname Waste-Monitoring
+sudo hostnamectl set-hostname waste-monitoring-v2
 ```
 
 ### 2 — Fix /etc/hosts (prevents sudo warnings)
@@ -665,7 +681,7 @@ sudo reboot
 After reboot, from any device on the same network:
 
 ```
-http://Waste-Monitoring.local:5000
+http://waste-monitoring-v2.local:5000
 ```
 
 > **Windows:** mDNS (`.local`) is supported natively on Windows 10/11, macOS, iOS, and Android.
@@ -673,7 +689,7 @@ http://Waste-Monitoring.local:5000
 
 ### Optional — remove the port number
 
-To access as just `http://Waste-Monitoring.local`, bind Flask to port 80 using `authbind`:
+To access as just `http://waste-monitoring-v2.local`, bind Flask to port 80 using `authbind`:
 
 ```bash
 sudo apt install -y authbind
@@ -838,7 +854,7 @@ Use this workflow every time you push updated code to the Pi.
 
 ```bash
 cd ~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics
-git pull
+git pull origin feature/rs485-modbus-scale
 source venv/bin/activate
 pip install -r requirements.txt -r requirements-pi.txt   # only needed if dependencies changed
 sudo systemctl restart waste-monitor
@@ -860,19 +876,19 @@ From your **laptop / dev machine**, copy the updated project over SSH:
 
 ```powershell
 # Windows (PowerShell) — run from the project root
-scp -r . pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/
+scp -r . pi@waste-monitoring-v2.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/
 ```
 
 ```bash
 # macOS / Linux
 rsync -av --exclude '.venv' --exclude '__pycache__' --exclude 'data/' \
-  ./ pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/
+  ./ pi@waste-monitoring-v2.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/
 ```
 
 Then SSH in and restart:
 
 ```bash
-ssh pi@Waste-Monitoring.local
+ssh pi@waste-monitoring-v2.local
 cd ~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics
 source venv/bin/activate
 pip install -r requirements.txt -r requirements-pi.txt   # only if deps changed
@@ -891,7 +907,7 @@ sudo reboot
 The service starts automatically on boot (systemd). Wait ~30 seconds, then open:
 
 ```
-http://Waste-Monitoring.local:5000
+http://waste-monitoring-v2.local:5000
 ```
 
 ---
@@ -1021,13 +1037,13 @@ Copy both files to the Pi:
 
 ```powershell
 # Windows — from the project root
-scp model.tflite pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/waste_classifier.tflite
-scp labels.txt   pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/waste_labels.txt
+scp model.tflite pi@waste-monitoring-v2.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/waste_classifier.tflite
+scp labels.txt   pi@waste-monitoring-v2.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/waste_labels.txt
 ```
 
 ```bash
 # macOS / Linux
-scp model.tflite labels.txt pi@Waste-Monitoring.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/
+scp model.tflite labels.txt pi@waste-monitoring-v2.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/
 ```
 
 ### Step 5 — Update config.yaml
