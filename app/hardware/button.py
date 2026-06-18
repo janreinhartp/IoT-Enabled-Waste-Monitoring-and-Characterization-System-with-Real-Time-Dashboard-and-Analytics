@@ -65,11 +65,13 @@ class ButtonWatcher:
         self._gpio_pin = gpio_pin
         self._on_press = on_press
         self._GPIO = GPIO
+        self._debounce_s = debounce_ms / 1000.0
+        self._stop = threading.Event()
+        self._poll_thread: Optional[threading.Thread] = None
 
         GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
-        # Full reset of the pin to clear any state left by a previous crashed run.
-        # cleanup() unexports the sysfs entry and removes edge detection in the kernel.
+        # Full reset: clear any state left by a previous crashed run.
         try:
             GPIO.remove_event_detect(gpio_pin)
         except Exception:  # noqa: BLE001
@@ -79,26 +81,69 @@ class ButtonWatcher:
         except Exception:  # noqa: BLE001
             pass
         GPIO.setup(gpio_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        # FALLING = button pressed (pin goes HIGH→LOW)
-        GPIO.add_event_detect(
-            gpio_pin,
-            GPIO.FALLING,
-            callback=self._isr,
-            bouncetime=debounce_ms,
-        )
-        log.info(
-            "ButtonWatcher ready on BCM GPIO%d (debounce=%d ms)", gpio_pin, debounce_ms
-        )
+
+        # Try kernel edge-detection first (most efficient). On Raspberry Pi OS
+        # Bookworm with newer kernels the sysfs interface can be unavailable, so
+        # we fall back to a polling thread which works on every kernel version.
+        try:
+            GPIO.add_event_detect(
+                gpio_pin,
+                GPIO.FALLING,
+                callback=self._isr,
+                bouncetime=debounce_ms,
+            )
+            log.info(
+                "ButtonWatcher ready on BCM GPIO%d (edge-detect, debounce=%d ms)",
+                gpio_pin, debounce_ms,
+            )
+        except RuntimeError:
+            log.warning(
+                "ButtonWatcher GPIO%d: edge detection unavailable, falling back to polling",
+                gpio_pin,
+            )
+            self._poll_thread = threading.Thread(
+                target=self._poll_loop,
+                daemon=True,
+                name=f"btn-poll-gpio{gpio_pin}",
+            )
+            self._poll_thread.start()
+            log.info(
+                "ButtonWatcher ready on BCM GPIO%d (polling, debounce=%d ms)",
+                gpio_pin, debounce_ms,
+            )
+
+    def _poll_loop(self) -> None:
+        """Poll the GPIO pin at 20 ms intervals as a fallback for edge detection."""
+        last_state = 1  # internal pull-up → HIGH when not pressed
+        last_press_time = 0.0
+        while not self._stop.wait(0.02):
+            try:
+                state = self._GPIO.input(self._gpio_pin)
+            except Exception:  # noqa: BLE001
+                continue
+            now = time.monotonic()
+            # Detect HIGH→LOW transition (button pressed)
+            if last_state == 1 and state == 0:
+                if now - last_press_time >= self._debounce_s:
+                    last_press_time = now
+                    self._isr(self._gpio_pin)
+            last_state = state
 
     def _isr(self, channel: int) -> None:  # noqa: ARG002
-        """Interrupt service routine — fires in RPi.GPIO's internal thread."""
+        """Fires on button press (edge-detect callback or polling detection)."""
         log.info("Button pressed (GPIO%d)", self._gpio_pin)
         threading.Thread(target=self._on_press, daemon=True, name=f"btn-gpio{self._gpio_pin}").start()
 
     def close(self) -> None:
-        """Remove event detection and clean up GPIO."""
+        """Stop polling / remove edge detection and release the GPIO pin."""
+        self._stop.set()
+        if self._poll_thread:
+            self._poll_thread.join(timeout=1.0)
         try:
             self._GPIO.remove_event_detect(self._gpio_pin)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             self._GPIO.cleanup(self._gpio_pin)
         except Exception:  # noqa: BLE001
             pass
