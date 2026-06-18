@@ -66,7 +66,14 @@ class ButtonWatcher:
         self._on_press = on_press
         self._GPIO = GPIO
 
+        GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
+        # Remove any stale edge-detection left by a previous crashed run.
+        # Silently ignored if the pin had no prior event registered.
+        try:
+            GPIO.remove_event_detect(gpio_pin)
+        except Exception:  # noqa: BLE001
+            pass
         GPIO.setup(gpio_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         # FALLING = button pressed (pin goes HIGH→LOW)
         GPIO.add_event_detect(
@@ -81,8 +88,8 @@ class ButtonWatcher:
 
     def _isr(self, channel: int) -> None:  # noqa: ARG002
         """Interrupt service routine — fires in RPi.GPIO's internal thread."""
-        log.info("Button pressed (GPIO%d) — triggering record", self._gpio_pin)
-        threading.Thread(target=self._on_press, daemon=True, name="btn-record").start()
+        log.info("Button pressed (GPIO%d)", self._gpio_pin)
+        threading.Thread(target=self._on_press, daemon=True, name=f"btn-gpio{self._gpio_pin}").start()
 
     def close(self) -> None:
         """Remove event detection and clean up GPIO."""
