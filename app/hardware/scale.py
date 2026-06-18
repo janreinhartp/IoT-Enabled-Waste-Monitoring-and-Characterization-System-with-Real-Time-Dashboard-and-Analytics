@@ -243,6 +243,7 @@ class ModbusTCPScale:
         timeout: float = 1.0,
     ):
         # Lazy import — pymodbus is optional; serial-only deployments don't need it.
+        import pymodbus  # type: ignore[import-not-found]  # noqa: PLC0415
         from pymodbus.client import ModbusTcpClient  # type: ignore[import-not-found]
 
         self._decimal_places = decimal_places
