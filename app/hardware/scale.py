@@ -274,9 +274,9 @@ class ModbusTCPScale:
     def _slave_kw(self) -> dict:
         """Return the correct per-call slave kwarg for the installed pymodbus version.
 
-        pymodbus 2.x  → {"unit": N}
-        pymodbus 3.0–3.6 → {"slave": N}
-        pymodbus 3.7+ → {}  (unit ID is embedded in the TCP frame; no per-call kwarg)
+        pymodbus 2.x     → {"unit": N}
+        pymodbus 3.0–3.6  → {"slave": N}
+        pymodbus 3.7–3.13 → {"dev_id": N}
 
         We discover the right kwarg on the first call by trying each candidate and
         falling back if a TypeError is raised, then cache the result.
@@ -288,7 +288,7 @@ class ModbusTCPScale:
 
     def _read_registers(self, address: int, count: int):
         """Read holding registers, auto-detecting the correct slave kwarg."""
-        candidates = ["slave", "unit", None]  # try in order until one works
+        candidates = ["dev_id", "slave", "unit", None]  # newest → oldest pymodbus
         if self._slave_kwarg_probed:
             # Already know which kwarg to use (or that none is needed)
             kw = {self._slave_kwarg: self._slave_address} if self._slave_kwarg else {}
