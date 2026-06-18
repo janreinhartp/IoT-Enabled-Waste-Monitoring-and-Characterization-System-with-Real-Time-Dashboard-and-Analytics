@@ -245,9 +245,15 @@ class ModbusTCPScale:
         # Lazy import — pymodbus is optional; serial-only deployments don't need it.
         from pymodbus.client import ModbusTcpClient  # type: ignore[import-not-found]
 
-        self._slave = slave_address
         self._decimal_places = decimal_places
         self._unit_to_grams = unit_to_grams
+
+        # pymodbus 2.x uses 'unit=', pymodbus 3.x renamed it to 'slave='.
+        # Detect once at init so every Modbus call uses the right kwarg.
+        _major = int(pymodbus.__version__.split(".")[0])
+        self._slave_kw: dict = {"slave": slave_address} if _major >= 3 else {"unit": slave_address}
+        log.debug("pymodbus version %s detected; using kwarg %s",
+                  pymodbus.__version__, next(iter(self._slave_kw)))
 
         self._client = ModbusTcpClient(host=host, port=tcp_port, timeout=timeout)
         if not self._client.connect():
@@ -258,8 +264,8 @@ class ModbusTCPScale:
             )
 
         log.info(
-            "ModbusTCPScale connected to %s:%d (slave=%d)",
-            host, tcp_port, slave_address,
+            "ModbusTCPScale connected to %s:%d (slave=%d, pymodbus=%s)",
+            host, tcp_port, slave_address, pymodbus.__version__,
         )
 
     # ------------------------------------------------------------------
@@ -272,7 +278,7 @@ class ModbusTCPScale:
     def _read_double_word(self, start_register: int) -> int:
         """Read two consecutive 16-bit registers and combine into a signed 32-bit int."""
         result = self._client.read_holding_registers(
-            address=start_register, count=2, slave=self._slave
+            address=start_register, count=2, **self._slave_kw
         )
         if result.isError():
             raise IOError(
@@ -297,7 +303,7 @@ class ModbusTCPScale:
     def is_stable(self) -> bool:
         """Return True when the module reports a stable/settled reading."""
         result = self._client.read_holding_registers(
-            address=_REG_STATUS, count=1, slave=self._slave
+            address=_REG_STATUS, count=1, **self._slave_kw
         )
         if result.isError():
             return False
@@ -306,21 +312,21 @@ class ModbusTCPScale:
     def tare(self, samples: int = 16) -> None:  # noqa: ARG002
         """Send a tare command to the module."""
         self._client.write_register(
-            address=_REG_PEEL, value=_PEEL_TARE, slave=self._slave
+            address=_REG_PEEL, value=_PEEL_TARE, **self._slave_kw
         )
         log.info("Tare command sent to scale module (TCP)")
 
     def cancel_tare(self) -> None:
         """Cancel the most recent tare."""
         self._client.write_register(
-            address=_REG_PEEL, value=_PEEL_CANCEL_TARE, slave=self._slave
+            address=_REG_PEEL, value=_PEEL_CANCEL_TARE, **self._slave_kw
         )
         log.info("Cancel-tare command sent to scale module (TCP)")
 
     def zero_calibrate(self) -> None:
         """Trigger zero-point calibration on the module."""
         self._client.write_register(
-            address=_REG_CALIBRATION, value=_CAL_ZERO, slave=self._slave
+            address=_REG_CALIBRATION, value=_CAL_ZERO, **self._slave_kw
         )
         log.info("Zero calibration command sent to scale module (TCP)")
 
@@ -329,10 +335,10 @@ class ModbusTCPScale:
         low_word = known_weight_raw & 0xFFFF
         high_word = (known_weight_raw >> 16) & 0xFFFF
         self._client.write_registers(
-            address=_REG_CALIBRATION - 10, values=[low_word, high_word], slave=self._slave
+            address=_REG_CALIBRATION - 10, values=[low_word, high_word], **self._slave_kw
         )
         self._client.write_register(
-            address=_REG_CALIBRATION, value=_CAL_WEIGHT_POINT, slave=self._slave
+            address=_REG_CALIBRATION, value=_CAL_WEIGHT_POINT, **self._slave_kw
         )
         log.info(
             "Weight-point calibration triggered via TCP (raw value=%d)", known_weight_raw
@@ -342,13 +348,6 @@ class ModbusTCPScale:
         """Close the TCP connection."""
         self._client.close()
         log.info("ModbusTCPScale TCP connection closed")
-
-    def close(self) -> None:
-        """Close the serial port."""
-        try:
-            self._instrument.serial.close()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 # ----------------------------------------------------------------------------
