@@ -243,18 +243,12 @@ class ModbusTCPScale:
         timeout: float = 1.0,
     ):
         # Lazy import — pymodbus is optional; serial-only deployments don't need it.
+        import inspect as _inspect  # noqa: PLC0415
         import pymodbus  # type: ignore[import-not-found]  # noqa: PLC0415
         from pymodbus.client import ModbusTcpClient  # type: ignore[import-not-found]
 
         self._decimal_places = decimal_places
         self._unit_to_grams = unit_to_grams
-
-        # pymodbus 2.x uses 'unit=', pymodbus 3.x renamed it to 'slave='.
-        # Detect once at init so every Modbus call uses the right kwarg.
-        _major = int(pymodbus.__version__.split(".")[0])
-        self._slave_kw: dict = {"slave": slave_address} if _major >= 3 else {"unit": slave_address}
-        log.debug("pymodbus version %s detected; using kwarg %s",
-                  pymodbus.__version__, next(iter(self._slave_kw)))
 
         self._client = ModbusTcpClient(host=host, port=tcp_port, timeout=timeout)
         if not self._client.connect():
@@ -264,9 +258,31 @@ class ModbusTCPScale:
                 "plugged in, and the gateway IP/port match config.yaml."
             )
 
+        # Detect the slave kwarg name by inspecting the actual installed method
+        # signature — avoids hard-coding pymodbus version numbers:
+        #   pymodbus 2.x → unit=
+        #   pymodbus 3.0–3.6 → slave=
+        #   pymodbus 3.7+ → parameter removed; slave is implicit / set elsewhere
+        _params = set(_inspect.signature(
+            self._client.read_holding_registers
+        ).parameters)
+        if "slave" in _params:
+            self._slave_kw: dict = {"slave": slave_address}
+        elif "unit" in _params:
+            self._slave_kw = {"unit": slave_address}
+        else:
+            self._slave_kw = {}
+            log.warning(
+                "pymodbus %s: read_holding_registers has no slave/unit parameter. "
+                "Slave address %d will not be sent per-call — ensure the gateway "
+                "is configured to forward to slave %d.",
+                pymodbus.__version__, slave_address, slave_address,
+            )
+
         log.info(
-            "ModbusTCPScale connected to %s:%d (slave=%d, pymodbus=%s)",
+            "ModbusTCPScale connected to %s:%d (slave=%d, pymodbus=%s, kwarg=%s)",
             host, tcp_port, slave_address, pymodbus.__version__,
+            next(iter(self._slave_kw), "none"),
         )
 
     # ------------------------------------------------------------------
