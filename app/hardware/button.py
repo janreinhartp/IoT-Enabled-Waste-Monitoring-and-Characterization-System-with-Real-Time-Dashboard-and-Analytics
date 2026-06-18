@@ -68,10 +68,14 @@ class ButtonWatcher:
 
         GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
-        # Remove any stale edge-detection left by a previous crashed run.
-        # Silently ignored if the pin had no prior event registered.
+        # Full reset of the pin to clear any state left by a previous crashed run.
+        # cleanup() unexports the sysfs entry and removes edge detection in the kernel.
         try:
             GPIO.remove_event_detect(gpio_pin)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            GPIO.cleanup(gpio_pin)
         except Exception:  # noqa: BLE001
             pass
         GPIO.setup(gpio_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
