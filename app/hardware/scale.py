@@ -2,10 +2,18 @@
 
 Register map (from module datasheet):
   0–1   Real-time net weight     (Double word, signed 32-bit, little-endian word order)
-  2–3   Stable value hold        (Double word, signed 32-bit, little-endian word order)
-  6     Status flags             (Word — Bit0: steady/stable flag)
+  2–3   Stable value hold        (Double word — updated only when weight is stable;
+                                  holds last stable value while fluctuating)
+  4–5   Peak net weight          (Double word — clear via peel register write 3)
+  6     Status flags             (Word — Bit0: steady/stable, Bit8: X0 input, Bit9: X1 input)
+  7     Relay status             (Word — Bit0: Y0 output, Bit1: Y1 output)
+  8–9   Calibration weight       (Double word — reserved; calibrate via the scale
+                                  module's front panel, not via software)
+  10–11 Real-time gross weight   (Double word)
+  12–13 Temporary tare           (Double word)
+  14–15 Sensor signal voltage    (Double word — unit 0.01 µV; 1 000 000 = 10.0 mV)
+  16    Unused                   (Do not write)
   17    Peeling operation        (Single word — write 1=tare, 2=cancel tare, 3=clear peak)
-  18    Calibration operation    (Single word — write 1=zero cal, 2=weight point cal)
 
 Communication: Modbus RTU, 9600 baud (default), 8 data bits, 1 stop bit, no parity.
 
@@ -15,11 +23,19 @@ Raw integer → grams conversion:
 Example: module calibrated in kg, 2 decimal places → decimal_places=2, unit_to_grams=1000.0
          module calibrated in grams, 0 decimal places → decimal_places=0, unit_to_grams=1.0
 
+Verified against datasheet example:
+  Request  01 03 00 00 00 02 C4 0B  → read regs 0-1
+  Reply    01 03 04 04 D2 00 00 5B 3A
+    reg[0]=0x04D2=1234 (low word), reg[1]=0x0000=0 (high word)
+    combined = (0 << 16) | 1234 = 1234
+    with decimal_places=2, unit_to_grams=1000: 1234/100*1000 = 12340 g (12.34 kg) ✓
+
 Provides:
-  * :class:`Scale`              – abstract Protocol
-  * :class:`ModbusRTUScale`     – real RS485 Modbus RTU driver (minimalmodbus)
-  * :func:`build_scale`         – factory selecting real or mock based on config
-  * :class:`StableEventDetector`– turns a weight sample stream into placement events
+  * :class:`Scale`               – abstract Protocol
+  * :class:`ModbusRTUScale`      – real RS485 Modbus RTU driver (minimalmodbus)
+  * :class:`ModbusTCPScale`      – Modbus TCP driver for RS485-to-Ethernet gateways
+  * :func:`build_scale`          – factory selecting real or mock based on config
+  * :class:`StableEventDetector` – turns a weight sample stream into placement events
 """
 
 from __future__ import annotations
@@ -35,18 +51,18 @@ from app.utils import get_logger
 log = get_logger(__name__)
 
 # Modbus register addresses (from datasheet)
-_REG_NET_WEIGHT = 0       # Double word (regs 0–1): real-time net weight
-_REG_STABLE_WEIGHT = 2    # Double word (regs 2–3): stable value hold
-_REG_STATUS = 6           # Word: Bit0 = steady/stable flag
-_REG_PEEL = 17            # Single word: peeling / tare operations
-_REG_CALIBRATION = 18     # Single word: calibration operations
+_REG_NET_WEIGHT    = 0   # Double word (regs 0–1): real-time net weight
+_REG_STABLE_WEIGHT = 2   # Double word (regs 2–3): stable value hold
+_REG_PEAK_WEIGHT   = 4   # Double word (regs 4–5): peak net weight
+_REG_STATUS        = 6   # Word: Bit0 = steady/stable flag
+_REG_RELAY         = 7   # Word: relay output state
+_REG_GROSS_WEIGHT  = 10  # Double word (regs 10–11): real-time gross weight
+_REG_TARE          = 12  # Double word (regs 12–13): temporary tare value
+_REG_PEEL          = 17  # Single word: peeling / tare operations
 
 _PEEL_TARE = 1            # Write to _REG_PEEL to tare
 _PEEL_CANCEL_TARE = 2     # Write to _REG_PEEL to cancel tare
 _PEEL_CLEAR_PEAK = 3      # Write to _REG_PEEL to clear peak
-
-_CAL_ZERO = 1             # Write to _REG_CALIBRATION for zero calibration
-_CAL_WEIGHT_POINT = 2     # Write to _REG_CALIBRATION for weight point calibration
 
 _STABLE_BIT = 0x0001      # Bit0 of status register
 
@@ -176,28 +192,6 @@ class ModbusRTUScale:
         self._instrument.write_register(_REG_PEEL, _PEEL_CANCEL_TARE, functioncode=6)
         log.info("Cancel-tare command sent to scale module")
 
-    def zero_calibrate(self) -> None:
-        """Trigger an internal zero-point calibration on the module."""
-        self._instrument.write_register(_REG_CALIBRATION, _CAL_ZERO, functioncode=6)
-        log.info("Zero calibration command sent to scale module")
-
-    def weight_point_calibrate(self, known_weight_raw: int) -> None:
-        """Trigger a weight-point calibration with a known reference weight.
-
-        Args:
-            known_weight_raw: The reference weight expressed as a raw integer
-                              (i.e. already scaled by 10**decimal_places and
-                              divided by unit_to_grams). For example, if the
-                              module is in kg with 2 decimal places, 5 kg is
-                              represented as 500.
-        """
-        # Write the known weight value to registers 8–9 (double word)
-        low_word = known_weight_raw & 0xFFFF
-        high_word = (known_weight_raw >> 16) & 0xFFFF
-        self._instrument.write_registers(_REG_CALIBRATION - 10, [low_word, high_word])  # regs 8–9
-        self._instrument.write_register(_REG_CALIBRATION, _CAL_WEIGHT_POINT, functioncode=6)
-        log.info("Weight-point calibration triggered (raw value=%d)", known_weight_raw)
-
     def close(self) -> None:
         """Release the serial port."""
         try:
@@ -243,12 +237,12 @@ class ModbusTCPScale:
         timeout: float = 1.0,
     ):
         # Lazy import — pymodbus is optional; serial-only deployments don't need it.
-        import inspect as _inspect  # noqa: PLC0415
         import pymodbus  # type: ignore[import-not-found]  # noqa: PLC0415
         from pymodbus.client import ModbusTcpClient  # type: ignore[import-not-found]
 
         self._decimal_places = decimal_places
         self._unit_to_grams = unit_to_grams
+        self._slave_address = slave_address
 
         self._client = ModbusTcpClient(host=host, port=tcp_port, timeout=timeout)
         if not self._client.connect():
@@ -258,31 +252,16 @@ class ModbusTCPScale:
                 "plugged in, and the gateway IP/port match config.yaml."
             )
 
-        # Detect the slave kwarg name by inspecting the actual installed method
-        # signature — avoids hard-coding pymodbus version numbers:
-        #   pymodbus 2.x → unit=
+        # Candidate kwarg names in preference order across pymodbus versions:
+        #   pymodbus 2.x  → unit=
         #   pymodbus 3.0–3.6 → slave=
-        #   pymodbus 3.7+ → parameter removed; slave is implicit / set elsewhere
-        _params = set(_inspect.signature(
-            self._client.read_holding_registers
-        ).parameters)
-        if "slave" in _params:
-            self._slave_kw: dict = {"slave": slave_address}
-        elif "unit" in _params:
-            self._slave_kw = {"unit": slave_address}
-        else:
-            self._slave_kw = {}
-            log.warning(
-                "pymodbus %s: read_holding_registers has no slave/unit parameter. "
-                "Slave address %d will not be sent per-call — ensure the gateway "
-                "is configured to forward to slave %d.",
-                pymodbus.__version__, slave_address, slave_address,
-            )
+        #   pymodbus 3.7+ → neither (the TCP frame embeds it without an explicit kwarg)
+        self._slave_kwarg: Optional[str] = "slave"  # will auto-probe on first call
+        self._slave_kwarg_probed = False
 
         log.info(
-            "ModbusTCPScale connected to %s:%d (slave=%d, pymodbus=%s, kwarg=%s)",
+            "ModbusTCPScale connected to %s:%d (slave=%d, pymodbus=%s)",
             host, tcp_port, slave_address, pymodbus.__version__,
-            next(iter(self._slave_kw), "none"),
         )
 
     # ------------------------------------------------------------------
@@ -292,11 +271,76 @@ class ModbusTCPScale:
     def _raw_to_grams(self, raw: int) -> float:
         return (raw / (10 ** self._decimal_places)) * self._unit_to_grams
 
+    def _slave_kw(self) -> dict:
+        """Return the correct per-call slave kwarg for the installed pymodbus version.
+
+        pymodbus 2.x  → {"unit": N}
+        pymodbus 3.0–3.6 → {"slave": N}
+        pymodbus 3.7+ → {}  (unit ID is embedded in the TCP frame; no per-call kwarg)
+
+        We discover the right kwarg on the first call by trying each candidate and
+        falling back if a TypeError is raised, then cache the result.
+        """
+        if self._slave_kwarg_probed:
+            return {self._slave_kwarg: self._slave_address} if self._slave_kwarg else {}
+        # Not yet probed — return the current candidate; _probe_and_read handles fallback
+        return {self._slave_kwarg: self._slave_address} if self._slave_kwarg else {}
+
+    def _read_registers(self, address: int, count: int):
+        """Read holding registers, auto-detecting the correct slave kwarg."""
+        candidates = ["slave", "unit", None]  # try in order until one works
+        if self._slave_kwarg_probed:
+            # Already know which kwarg to use (or that none is needed)
+            kw = {self._slave_kwarg: self._slave_address} if self._slave_kwarg else {}
+            result = self._client.read_holding_registers(address=address, count=count, **kw)
+            return result
+
+        for candidate in candidates:
+            kw = {candidate: self._slave_address} if candidate else {}
+            try:
+                result = self._client.read_holding_registers(
+                    address=address, count=count, **kw
+                )
+                # Success — cache this kwarg for all future calls
+                self._slave_kwarg = candidate
+                self._slave_kwarg_probed = True
+                log.info(
+                    "ModbusTCPScale: auto-detected slave kwarg = %r",
+                    candidate if candidate else "(none needed)",
+                )
+                return result
+            except TypeError:
+                continue  # try next candidate
+
+        raise RuntimeError(
+            "pymodbus: could not find a working slave kwarg. "
+            "Tried: slave=, unit=, and no kwarg. Check your pymodbus version."
+        )
+
+    def _write_register(self, address: int, value: int) -> None:
+        """Write a single holding register, auto-detecting the correct slave kwarg."""
+        if not self._slave_kwarg_probed:
+            # Trigger auto-detection via a read first
+            self._read_registers(address, 1)
+        kw = {self._slave_kwarg: self._slave_address} if self._slave_kwarg else {}
+        try:
+            self._client.write_register(address=address, value=value, **kw)
+        except TypeError:
+            self._client.write_register(address=address, value=value)
+
+    def _write_registers(self, address: int, values: list) -> None:
+        """Write multiple holding registers, auto-detecting the correct slave kwarg."""
+        if not self._slave_kwarg_probed:
+            self._read_registers(address, 1)
+        kw = {self._slave_kwarg: self._slave_address} if self._slave_kwarg else {}
+        try:
+            self._client.write_registers(address=address, values=values, **kw)
+        except TypeError:
+            self._client.write_registers(address=address, values=values)
+
     def _read_double_word(self, start_register: int) -> int:
         """Read two consecutive 16-bit registers and combine into a signed 32-bit int."""
-        result = self._client.read_holding_registers(
-            address=start_register, count=2, **self._slave_kw
-        )
+        result = self._read_registers(start_register, 2)
         if result.isError():
             raise IOError(
                 f"Modbus TCP read error at register {start_register}: {result}"
@@ -319,47 +363,20 @@ class ModbusTCPScale:
 
     def is_stable(self) -> bool:
         """Return True when the module reports a stable/settled reading."""
-        result = self._client.read_holding_registers(
-            address=_REG_STATUS, count=1, **self._slave_kw
-        )
+        result = self._read_registers(_REG_STATUS, 1)
         if result.isError():
             return False
         return bool(result.registers[0] & _STABLE_BIT)
 
     def tare(self, samples: int = 16) -> None:  # noqa: ARG002
         """Send a tare command to the module."""
-        self._client.write_register(
-            address=_REG_PEEL, value=_PEEL_TARE, **self._slave_kw
-        )
+        self._write_register(_REG_PEEL, _PEEL_TARE)
         log.info("Tare command sent to scale module (TCP)")
 
     def cancel_tare(self) -> None:
         """Cancel the most recent tare."""
-        self._client.write_register(
-            address=_REG_PEEL, value=_PEEL_CANCEL_TARE, **self._slave_kw
-        )
+        self._write_register(_REG_PEEL, _PEEL_CANCEL_TARE)
         log.info("Cancel-tare command sent to scale module (TCP)")
-
-    def zero_calibrate(self) -> None:
-        """Trigger zero-point calibration on the module."""
-        self._client.write_register(
-            address=_REG_CALIBRATION, value=_CAL_ZERO, **self._slave_kw
-        )
-        log.info("Zero calibration command sent to scale module (TCP)")
-
-    def weight_point_calibrate(self, known_weight_raw: int) -> None:
-        """Trigger weight-point calibration with a known reference weight."""
-        low_word = known_weight_raw & 0xFFFF
-        high_word = (known_weight_raw >> 16) & 0xFFFF
-        self._client.write_registers(
-            address=_REG_CALIBRATION - 10, values=[low_word, high_word], **self._slave_kw
-        )
-        self._client.write_register(
-            address=_REG_CALIBRATION, value=_CAL_WEIGHT_POINT, **self._slave_kw
-        )
-        log.info(
-            "Weight-point calibration triggered via TCP (raw value=%d)", known_weight_raw
-        )
 
     def close(self) -> None:
         """Close the TCP connection."""
