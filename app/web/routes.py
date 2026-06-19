@@ -168,6 +168,11 @@ def register(
         days = max(1, min(int(request.args.get("days", 14)), 90))
         return jsonify(db.daily_totals(days=days))
 
+    @app.get("/api/hourly")
+    def api_hourly():
+        hours = max(1, min(int(request.args.get("hours", 24)), 168))
+        return jsonify(db.hourly_totals(hours=hours))
+
     @app.get("/api/categories")
     def api_categories():
         return jsonify(db.list_categories())

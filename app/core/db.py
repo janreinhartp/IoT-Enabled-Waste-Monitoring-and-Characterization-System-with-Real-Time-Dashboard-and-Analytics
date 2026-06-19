@@ -251,3 +251,29 @@ class Database:
                 {"date": str(day), "count": int(count), "weight_g": float(weight)}
                 for day, count, weight in rows
             ]
+
+    def hourly_totals(self, *, hours: int = 24) -> List[dict]:
+        """Return list of {hour, count, weight_g} for the last ``hours`` hours.
+
+        ``hour`` is formatted as ``HH:00`` (e.g. ``"14:00"``), suitable for
+        direct use as a chart label.
+        """
+        since = datetime.utcnow() - timedelta(hours=hours)
+        with self.session() as s:
+            # SQLite strftime gives zero-padded HH:MM — we group by hour bucket
+            hour_expr = func.strftime("%H:00", WasteEvent.timestamp)
+            stmt = (
+                select(
+                    hour_expr.label("hour"),
+                    func.count(WasteEvent.id),
+                    func.coalesce(func.sum(WasteEvent.weight_grams), 0.0),
+                )
+                .where(WasteEvent.timestamp >= since)
+                .group_by(hour_expr)
+                .order_by(hour_expr)
+            )
+            rows = s.execute(stmt).all()
+            return [
+                {"hour": str(hour), "count": int(count), "weight_g": float(weight)}
+                for hour, count, weight in rows
+            ]

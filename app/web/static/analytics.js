@@ -50,22 +50,23 @@
     });
   }
 
-  async function renderDaily() {
-    const daily = await fetchJSON("/api/daily?days=14");
+  async function renderHourly() {
+    const hourly = await fetchJSON("/api/hourly?hours=24");
     new Chart(document.getElementById("chart-daily"), {
       type: "line",
       data: {
-        labels: daily.map((d) => d.date),
+        labels: hourly.map((d) => d.hour),
         datasets: [
-          { label: "Weight (g)", data: daily.map((d) => d.weight_g), borderColor: "#047857", tension: 0.25 },
-          { label: "Items", data: daily.map((d) => d.count), borderColor: "#f59e0b", tension: 0.25, yAxisID: "y1" },
+          { label: "Weight (g)", data: hourly.map((d) => d.weight_g), borderColor: "#047857", tension: 0.25, fill: false },
+          { label: "Items", data: hourly.map((d) => d.count), borderColor: "#f59e0b", tension: 0.25, fill: false, yAxisID: "y1" },
         ],
       },
       options: {
         responsive: true,
         scales: {
-          y: { position: "left", title: { display: true, text: "Weight (g)" } },
-          y1: { position: "right", title: { display: true, text: "Items" }, grid: { drawOnChartArea: false } },
+          x: { title: { display: true, text: "Hour (UTC)" } },
+          y: { position: "left", title: { display: true, text: "Weight (g)" }, beginAtZero: true },
+          y1: { position: "right", title: { display: true, text: "Items" }, beginAtZero: true, grid: { drawOnChartArea: false } },
         },
       },
     });
@@ -75,7 +76,7 @@
     try {
       const all = await loadStats();
       renderCategoryCharts(all);
-      await renderDaily();
+      await renderHourly();
     } catch (err) {
       console.error("analytics load failed", err);
     }
