@@ -243,6 +243,9 @@ class ModbusTCPScale:
         self._decimal_places = decimal_places
         self._unit_to_grams = unit_to_grams
         self._slave_address = slave_address
+        self._host = host
+        self._tcp_port = tcp_port
+        self._timeout = timeout
 
         self._client = ModbusTcpClient(host=host, port=tcp_port, timeout=timeout)
         if not self._client.connect():
@@ -286,36 +289,71 @@ class ModbusTCPScale:
         # Not yet probed — return the current candidate; _probe_and_read handles fallback
         return {self._slave_kwarg: self._slave_address} if self._slave_kwarg else {}
 
-    def _read_registers(self, address: int, count: int):
-        """Read holding registers, auto-detecting the correct slave kwarg."""
-        candidates = ["dev_id", "slave", "unit", None]  # newest → oldest pymodbus
-        if self._slave_kwarg_probed:
-            # Already know which kwarg to use (or that none is needed)
-            kw = {self._slave_kwarg: self._slave_address} if self._slave_kwarg else {}
-            result = self._client.read_holding_registers(address=address, count=count, **kw)
-            return result
-
-        for candidate in candidates:
-            kw = {candidate: self._slave_address} if candidate else {}
-            try:
-                result = self._client.read_holding_registers(
-                    address=address, count=count, **kw
-                )
-                # Success — cache this kwarg for all future calls
-                self._slave_kwarg = candidate
-                self._slave_kwarg_probed = True
-                log.info(
-                    "ModbusTCPScale: auto-detected slave kwarg = %r",
-                    candidate if candidate else "(none needed)",
-                )
-                return result
-            except TypeError:
-                continue  # try next candidate
-
-        raise RuntimeError(
-            "pymodbus: could not find a working slave kwarg. "
-            "Tried: slave=, unit=, and no kwarg. Check your pymodbus version."
+    def _reconnect(self) -> None:
+        """Close the current client and open a fresh TCP connection."""
+        try:
+            self._client.close()
+        except Exception:  # noqa: BLE001
+            pass
+        from pymodbus.client import ModbusTcpClient  # type: ignore[import-not-found]
+        self._client = ModbusTcpClient(
+            host=self._host, port=self._tcp_port, timeout=self._timeout
         )
+        if not self._client.connect():
+            raise ConnectionError(
+                f"Modbus TCP reconnect failed: {self._host}:{self._tcp_port}"
+            )
+        log.info(
+            "ModbusTCPScale reconnected to %s:%d", self._host, self._tcp_port
+        )
+
+    def _read_registers(self, address: int, count: int):
+        """Read holding registers, auto-detecting the correct slave kwarg.
+
+        Automatically reconnects once if pymodbus closed the connection after
+        a timeout (ModbusIOException with 'CLOSING CONNECTION' in the message).
+        """
+        from pymodbus.exceptions import ModbusIOException  # type: ignore[import-not-found]
+
+        candidates = ["dev_id", "slave", "unit", None]  # newest → oldest pymodbus
+
+        def _do_read():
+            if self._slave_kwarg_probed:
+                kw = {self._slave_kwarg: self._slave_address} if self._slave_kwarg else {}
+                return self._client.read_holding_registers(address=address, count=count, **kw)
+
+            for candidate in candidates:
+                kw = {candidate: self._slave_address} if candidate else {}
+                try:
+                    result = self._client.read_holding_registers(
+                        address=address, count=count, **kw
+                    )
+                    self._slave_kwarg = candidate
+                    self._slave_kwarg_probed = True
+                    log.info(
+                        "ModbusTCPScale: auto-detected slave kwarg = %r",
+                        candidate if candidate else "(none needed)",
+                    )
+                    return result
+                except TypeError:
+                    continue
+
+            raise RuntimeError(
+                "pymodbus: could not find a working slave kwarg. "
+                "Tried: dev_id=, slave=, unit=, and no kwarg. "
+                "Check your pymodbus version."
+            )
+
+        try:
+            return _do_read()
+        except ModbusIOException as exc:
+            log.warning(
+                "ModbusTCPScale: connection lost (%s) — reconnecting and retrying once",
+                exc,
+            )
+            self._reconnect()
+            return _do_read()
+
 
     def _write_register(self, address: int, value: int) -> None:
         """Write a single holding register, auto-detecting the correct slave kwarg."""

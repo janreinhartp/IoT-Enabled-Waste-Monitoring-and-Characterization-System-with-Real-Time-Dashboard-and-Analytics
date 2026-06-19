@@ -120,6 +120,9 @@ web:
   debug: false
   # Secret used by Flask sessions / Socket.IO
   secret_key: change-me-in-production
+  # Admin credentials — required to access Settings and reset the database
+  admin_username: admin
+  admin_password: change-me-in-production
 
 # ---- Storage ----
 storage:

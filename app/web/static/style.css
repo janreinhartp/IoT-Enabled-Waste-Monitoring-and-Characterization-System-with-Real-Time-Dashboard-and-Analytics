@@ -35,6 +35,22 @@ canvas { max-width: 100%; }
 .settings-section h3 { margin-top: 0; font-size: 1rem; color: #374151; }
 .settings-desc { margin: 0.4rem 0; font-size: 0.95rem; }
 .settings-desc.warn { color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 0.4rem; padding: 0.6rem 0.8rem; }
+/* ---- Auth ---- */
+.nav-logout-form { display: inline; margin: 0; padding: 0; }
+.nav-logout-btn { background: none; border: 1px solid #6ee7b7; color: #d1fae5; border-radius: 0.4rem; padding: 0.2rem 0.7rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; margin-left: 0.5rem; }
+.nav-logout-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.login-wrap { display: flex; justify-content: center; align-items: flex-start; padding-top: 3rem; }
+.login-card { width: 100%; max-width: 380px; }
+.login-heading { margin-top: 0; font-size: 1.25rem; }
+.login-desc { color: #6b7280; font-size: 0.9rem; margin-bottom: 1.25rem; }
+.login-error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; border-radius: 0.4rem; padding: 0.6rem 0.8rem; margin-bottom: 1rem; font-size: 0.92rem; }
+.login-form { display: flex; flex-direction: column; gap: 0.9rem; }
+.login-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.login-field label { font-size: 0.88rem; font-weight: 600; color: #374151; }
+.login-field input { padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 0.4rem; font-size: 0.95rem; outline: none; }
+.login-field input:focus { border-color: #047857; box-shadow: 0 0 0 2px rgba(4,120,87,0.15); }
+.btn-login { background: #047857; color: #fff; border: none; padding: 0.6rem 1.5rem; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 0.25rem; }
+.btn-login:hover { background: #065f46; }
 .btn { display: inline-block; padding: 0.5rem 1.25rem; border: none; border-radius: 0.5rem; font-size: 0.95rem; cursor: pointer; font-weight: 600; margin-top: 0.75rem; }
 .btn-danger { background: #dc2626; color: #fff; }
 .btn-danger:hover:not(:disabled) { background: #b91c1c; }
@@ -51,16 +67,9 @@ canvas { max-width: 100%; }
 .step-badge { flex-shrink: 0; width: 2rem; height: 2rem; background: #047857; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1rem; }
 .step-body p { margin: 0 0 0.5rem; font-size: 0.95rem; }
 .calib-input { padding: 0.4rem 0.6rem; border: 1px solid #d1d5db; border-radius: 0.4rem; font-size: 0.95rem; width: 10rem; margin-right: 0.5rem; }
-.btn-record { display: block; width: 100%; margin-top: 1rem; padding: 0.65rem 1rem; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: 700; cursor: pointer; background: #dc2626; color: #fff; letter-spacing: 0.02em; transition: background 0.2s; }
-.btn-record:hover:not(:disabled) { background: #b91c1c; }
-.btn-record:disabled { opacity: 0.55; cursor: not-allowed; }
-.btn-scan { display: block; width: 100%; margin-top: 0.5rem; padding: 0.55rem 1rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; background: #f9fafb; color: #374151; transition: background 0.2s; }
-.btn-scan:hover:not(:disabled) { background: #e5e7eb; }
-.btn-scan:disabled { opacity: 0.55; cursor: not-allowed; }
 .record-feedback { margin-top: 0.4rem; font-size: 0.85rem; min-height: 1.2em; text-align: center; }
-/* Two-step Analyze → Record */
-.two-step-wrap { margin-top: 1rem; padding: 0.75rem; border: 1px dashed #d1d5db; border-radius: 0.5rem; background: #f9fafb; }
-.two-step-hint { font-size: 0.78rem; color: #6b7280; margin-bottom: 0.5rem; }
+/* Analyze → Record */
+.two-step-wrap { margin-top: 1rem; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; background: #f9fafb; }
 .two-step-btns { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .btn { padding: 0.55rem 1rem; border: none; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: background 0.2s, opacity 0.2s; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -70,6 +79,8 @@ canvas { max-width: 100%; }
 .btn-commit:hover:not(:disabled)  { background: #15803d; }
 .btn-clear-pending { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
 .btn-clear-pending:hover:not(:disabled) { background: #e5e7eb; }
+.btn-reset-tare { background: #fffbeb; color: #92400e; border: 1px solid #fcd34d; }
+.btn-reset-tare:hover:not(:disabled) { background: #fef3c7; }
 .pending-preview { margin-top: 0.6rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 0.88rem; }
 .pending-label { font-weight: 700; color: #6b7280; text-transform: uppercase; font-size: 0.75rem; }
 .pending-conf  { color: #6b7280; font-size: 0.8rem; }

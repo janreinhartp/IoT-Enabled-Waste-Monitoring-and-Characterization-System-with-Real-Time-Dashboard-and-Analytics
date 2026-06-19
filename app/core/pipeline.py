@@ -144,12 +144,13 @@ class Pipeline:
     # ------------------------------------------------------------------
 
     def analyze_and_hold(self) -> Optional[PendingDetection]:
-        """Step 1 — Capture frame, run AI, save image, store as pending.
+        """Step 1 — Capture frame, run AI, save image, tare scale, store as pending.
 
-        Call this when the **Analyze** button is pressed while the item is
-        still in front of the camera.  The image is saved to disk immediately
-        so it is preserved even if the item is moved before :meth:`commit_pending`
-        is called.
+        Flow: Analyze → Tare → Record
+
+        After a successful detection the scale is tared (peel command) so that
+        the next :meth:`commit_pending` call records only the weight of the item
+        placed on the scale *after* analysis, not any residual weight already on it.
 
         Returns the :class:`PendingDetection` on success, or ``None`` when
         the camera is unavailable or nothing is detected.
@@ -176,17 +177,23 @@ class Pipeline:
             (top.confidence * 100) if top else 0,
             image_path,
         )
+
+        # Tare the scale so the next reading measures only this item's weight.
+        try:
+            self._scale.tare()
+            log.info("analyze_and_hold: scale tared")
+        except Exception:  # noqa: BLE001
+            log.warning("analyze_and_hold: tare command failed (continuing)")
+
         return pending
 
-    def commit_pending(self, weight_g: Optional[float] = None) -> bool:
-        """Step 2 — Attach the current scale weight to the pending detection and save.
+    def commit_pending(self) -> bool:
+        """Step 2 — Attach the current (tared) scale weight to the pending detection and save.
 
         Call this when the **Record** button is pressed after the item has been
-        moved onto the scale and the weight has settled.
-
-        Args:
-            weight_g: Override weight in grams. Uses the latest live reading
-                      when not provided.
+        placed on the scale (which was tared during Analyze) and the weight
+        has settled.  The recorded weight is always the live reading, which
+        reflects only the item placed after the tare.
 
         Returns:
             ``True`` if a pending detection was committed, ``False`` if there
@@ -199,8 +206,8 @@ class Pipeline:
                 return False
             self._pending = None  # consume immediately
 
-        g = weight_g if weight_g is not None else self._latest_weight
-        log.info("commit_pending: recording pending detection at %.2f g", g)
+        g = self._latest_weight
+        log.info("commit_pending: recording pending detection at %.2f g (tared weight)", g)
         self._save_event_from_pending(pending, g)
         return True
 
@@ -209,6 +216,20 @@ class Pipeline:
         with self._pending_lock:
             self._pending = None
         log.info("clear_pending: pending detection cleared")
+
+    def reset_tare(self) -> bool:
+        """Cancel the current tare on the scale, restoring gross-weight baseline.
+
+        Useful when a button on the dashboard is pressed to zero out the
+        accumulated tare and start fresh.  Returns ``True`` on success.
+        """
+        try:
+            self._scale.cancel_tare()
+            log.info("reset_tare: cancel-tare sent to scale")
+            return True
+        except Exception:  # noqa: BLE001
+            log.warning("reset_tare: cancel-tare command failed")
+            return False
 
     def record_now(self) -> None:
         """Manually trigger a record at the current live weight.

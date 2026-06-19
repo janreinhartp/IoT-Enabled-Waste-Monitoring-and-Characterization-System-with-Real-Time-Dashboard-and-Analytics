@@ -61,6 +61,10 @@ class MockScale:
             self._weight = 0.0
             self._target = 0.0
 
+    def cancel_tare(self) -> None:
+        """Mock cancel-tare – no-op for the simulator (nothing to restore)."""
+        log.info("MockScale: cancel_tare called (no-op)")
+
     def close(self) -> None:
         """No-op for mock hardware."""
         pass

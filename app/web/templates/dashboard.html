@@ -11,28 +11,26 @@
       <div class="scale-status-bar" id="scale-status-bar"></div>
     </div>
     <div class="scale-status-detail" id="scale-status-detail"></div>
-    <button id="btn-record" class="btn-record" title="Manually record the current weight + camera frame">
-      ⏺ Record Now
-    </button>
-    <button id="btn-scan" class="btn-scan" title="See what the AI detects right now without recording">
-      🔍 What's here?
-    </button>
-
-    {# ---- Two-step Analyze → Record ---- #}
+    {# ---- Two-step Analyze → Tare → Record ---- #}
     <div class="two-step-wrap">
-      <div class="two-step-hint">Two-step mode: Analyze first, then place on scale and Record.</div>
       <div class="two-step-btns">
         <button id="btn-analyze" class="btn btn-analyze"
-                title="Step 1 — Point item at camera and capture + detect">
+                title="Step 1 — Point item at camera and capture + detect (scale is tared automatically)">
           🔬 Analyze
         </button>
         <button id="btn-commit" class="btn btn-commit" disabled
-                title="Step 2 — Place item on scale, wait for stable weight, then click">
+                title="Step 2 — Place item on scale (already tared), wait for stable weight, then click">
           ⚖ Record Weight
         </button>
         <button id="btn-clear-pending" class="btn btn-clear-pending" style="display:none"
                 title="Discard the pending analysis without recording">
           ✕ Clear
+        </button>
+      </div>
+      <div class="two-step-btns" style="margin-top:0.4rem">
+        <button id="btn-reset-tare" class="btn btn-reset-tare"
+                title="Cancel the current tare and return the scale to gross-weight baseline">
+          ↺ Reset Tare
         </button>
       </div>
       <div id="pending-preview" class="pending-preview" style="display:none">

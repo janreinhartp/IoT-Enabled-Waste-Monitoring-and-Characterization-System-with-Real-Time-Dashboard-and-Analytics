@@ -119,6 +119,9 @@ class WebConfig:
     port: int = 5000
     debug: bool = False
     secret_key: str = "change-me-in-production"
+    # Admin credentials — protect the Settings page and DB reset
+    admin_username: str = "admin"
+    admin_password: str = "admin"
 
 
 @dataclass

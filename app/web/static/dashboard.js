@@ -116,9 +116,7 @@
     prependRow(e);
   });
 
-  // ---- Manual record button ----
-  const btnRecord = document.getElementById("btn-record");
-  const btnScan = document.getElementById("btn-scan");
+  // ---- Feedback ----
   const recordFeedback = document.getElementById("record-feedback");
   const detectionPreview = document.getElementById("detection-preview");
   const detectionPreviewBody = document.getElementById("detection-preview-body");
@@ -163,53 +161,11 @@
     detectionPreview.style.display = "block";
   }
 
-  function runScan(andRecord) {
-    if (btnScan) btnScan.disabled = true;
-    if (btnRecord) btnRecord.disabled = true;
-    fetch("/api/detect/preview", { method: "POST" })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) {
-          setFeedback("Error: " + data.error, false);
-          return;
-        }
-        showDetections(data.detections, data.weight_g);
-        if (andRecord) {
-          if (!data.detections || data.detections.length === 0) {
-            setFeedback("Nothing detected — not recorded.", false);
-          } else {
-            // detections found — now actually record
-            fetch("/api/record", { method: "POST" })
-              .then((r) => r.json())
-              .then((rec) => {
-                if (rec.error) {
-                  setFeedback("Error: " + rec.error, false);
-                } else {
-                  setFeedback("Recording at " + rec.weight_g + " g…", true);
-                }
-              })
-              .catch(() => setFeedback("Record request failed.", false));
-          }
-        }
-      })
-      .catch(() => setFeedback("Scan failed.", false))
-      .finally(() => {
-        if (btnScan) btnScan.disabled = false;
-        if (btnRecord) btnRecord.disabled = false;
-      });
-  }
-
-  if (btnRecord) {
-    btnRecord.addEventListener("click", () => runScan(true));
-  }
-  if (btnScan) {
-    btnScan.addEventListener("click", () => runScan(false));
-  }
-
-  // ---- Two-step Analyze → Record ----
+  // ---- Two-step Analyze → Tare → Record ----
   const btnAnalyze     = document.getElementById("btn-analyze");
   const btnCommit      = document.getElementById("btn-commit");
   const btnClearPend   = document.getElementById("btn-clear-pending");
+  const btnResetTare   = document.getElementById("btn-reset-tare");
   const pendingPreview = document.getElementById("pending-preview");
   const pendingLabelEl = document.getElementById("pending-label-text");
   const pendingConfEl  = document.getElementById("pending-conf-text");
@@ -224,8 +180,8 @@
       if (pendingLabelEl) pendingLabelEl.textContent = pending.label || "unknown";
       if (pendingConfEl) pendingConfEl.textContent =
         pending.confidence != null ? "(" + Math.round(pending.confidence * 100) + "%)" : "";
-      if (pendingImgEl && pending.image_path) {
-        pendingImgEl.src = "/" + pending.image_path + "?t=" + Date.now();
+      if (pendingImgEl) {
+        pendingImgEl.src = "/images/pending?t=" + Date.now();
         pendingImgEl.style.display = "";
       }
     } else {
@@ -295,6 +251,27 @@
       fetch("/api/commit", { method: "DELETE" }).catch(() => {});  // best-effort
       setPendingUI({ pending: false });
       setFeedback("Pending analysis cleared.", true);
+    });
+  }
+
+  if (btnResetTare) {
+    btnResetTare.addEventListener("click", () => {
+      btnResetTare.disabled = true;
+      btnResetTare.textContent = "Resetting…";
+      fetch("/api/reset_tare", { method: "POST" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.error) {
+            setFeedback("Tare reset failed: " + data.error, false);
+          } else {
+            setFeedback("Tare reset — scale zeroed.", true);
+          }
+        })
+        .catch(() => setFeedback("Tare reset request failed.", false))
+        .finally(() => {
+          btnResetTare.disabled = false;
+          btnResetTare.textContent = "↺ Reset Tare";
+        });
     });
   }
 

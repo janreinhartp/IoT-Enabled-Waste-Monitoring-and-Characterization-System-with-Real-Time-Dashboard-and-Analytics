@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Admin Login - Waste Monitor{% endblock %}
+
+{% block content %}
+<div class="login-wrap">
+  <div class="card login-card">
+    <h2 class="login-heading">🔒 Admin Login</h2>
+    <p class="login-desc">Settings and database management require admin access.</p>
+
+    {% if error %}
+    <div class="login-error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('login_post') }}" class="login-form" autocomplete="off">
+      <input type="hidden" name="next" value="{{ next }}">
+      <div class="login-field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required autofocus
+               autocomplete="username" spellcheck="false">
+      </div>
+      <div class="login-field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required
+               autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-login">Log In</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

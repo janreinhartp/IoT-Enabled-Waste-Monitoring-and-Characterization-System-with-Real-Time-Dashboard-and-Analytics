@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import csv
+import hmac
 import io
 import os
 import sys
 import threading
 import time
 from datetime import datetime, timedelta
+from functools import wraps
 from typing import Optional
 
 from flask import (
@@ -16,9 +18,12 @@ from flask import (
     Response,
     abort,
     jsonify,
+    redirect,
     render_template,
     request,
     send_file,
+    session,
+    url_for,
 )
 from flask_socketio import SocketIO
 
@@ -33,6 +38,33 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _check_credentials(username: str, password: str, cfg: AppConfig) -> bool:
+    """Compare provided credentials against config using constant-time comparison."""
+    user_ok = hmac.compare_digest(username.encode(), cfg.web.admin_username.encode())
+    pass_ok = hmac.compare_digest(password.encode(), cfg.web.admin_password.encode())
+    return user_ok and pass_ok
+
+
+def _require_admin(f):
+    """Decorator: redirect to /login when the admin session is not active."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("admin_logged_in"):
+            return redirect(url_for("login", next=request.path))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _require_admin_api(f):
+    """Decorator for JSON API endpoints: return 401 instead of redirecting."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("admin_logged_in"):
+            return jsonify({"error": "Unauthorized. Please log in as admin."}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 
 def register(
@@ -67,6 +99,7 @@ def register(
         return render_template("analytics.html", categories=categories)
 
     @app.get("/settings")
+    @_require_admin
     def settings():
         from app.core.db import WasteEvent  # local import
         with db.session() as s:
@@ -75,6 +108,34 @@ def register(
             "settings.html",
             event_count=event_count,
         )
+
+    # ---- Auth ----
+
+    @app.get("/login")
+    def login():
+        if session.get("admin_logged_in"):
+            return redirect(url_for("settings"))
+        next_url = request.args.get("next", url_for("settings"))
+        return render_template("login.html", next=next_url, error=None)
+
+    @app.post("/login")
+    def login_post():
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        next_url = request.form.get("next", url_for("settings"))
+        if _check_credentials(username, password, cfg):
+            session["admin_logged_in"] = True
+            session.permanent = False
+            # Guard against open-redirect: only allow relative paths
+            if not next_url.startswith("/") or next_url.startswith("//"):
+                next_url = url_for("settings")
+            return redirect(next_url)
+        return render_template("login.html", next=next_url, error="Invalid username or password.")
+
+    @app.post("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("dashboard"))
 
     # ---- JSON API ----
 
@@ -119,6 +180,7 @@ def register(
         })
 
     @app.post("/api/reset_db")
+    @_require_admin_api
     def api_reset_db():
         deleted = db.reset_events()
         return jsonify({"deleted": deleted, "status": "ok"})
@@ -131,6 +193,21 @@ def register(
             return jsonify({"error": "Pipeline not running (start without --no-pipeline)."}), 400
         pipeline.record_now()
         return jsonify({"status": "recording", "weight_g": round(pipeline.latest_weight, 1)})
+
+    @app.post("/api/reset_tare")
+    def api_reset_tare():
+        """Cancel the current scale tare, restoring the gross-weight baseline.
+
+        Call this when the physical bin is emptied and a fresh tare baseline
+        is needed without pressing Analyze again.
+        """
+        pipeline = app.config.get("WASTE_PIPELINE")
+        if pipeline is None:
+            return jsonify({"error": "Pipeline not running."}), 400
+        ok = pipeline.reset_tare()
+        if not ok:
+            return jsonify({"error": "Tare reset failed (check scale connection)."}), 500
+        return jsonify({"status": "tare_reset"})
 
     @app.post("/api/analyze")
     def api_analyze():
@@ -224,6 +301,20 @@ def register(
         )
 
     # ---- Image serving ----
+
+    @app.get("/images/pending")
+    def pending_image():
+        """Serve the captured image for the current pending detection."""
+        pipeline = app.config.get("WASTE_PIPELINE")
+        if pipeline is None:
+            abort(404)
+        pending = pipeline.pending_detection
+        if pending is None or not pending.image_path:
+            abort(404)
+        abs_path = os.path.abspath(pending.image_path)
+        if not os.path.isfile(abs_path):
+            abort(404)
+        return send_file(abs_path, mimetype="image/jpeg")
 
     @app.get("/images/<int:event_id>")
     def event_image(event_id: int):
