@@ -25,7 +25,7 @@
   const STATE_LABELS = {
     idle: "⏳ Waiting for item (min " ,
     stabilizing: "📊 Stabilizing…",
-    cooldown: "✅ Recorded — remove item to reset",
+    cooldown: "✅ Recorded — press Analyze for next item",
   };
   const STATE_COLORS = {
     idle: "#6b7280",
@@ -45,7 +45,7 @@
     } else if (state === "stabilizing") {
       label = "📊 Stabilizing… (" + s.window_samples + " / " + s.stability_window + " samples)";
     } else {
-      label = "✅ Recorded — remove item to reset";
+      label = "✅ Recorded — press Analyze for next item";
     }
     liveStateEl.textContent = label;
     liveStateEl.style.color = color;
