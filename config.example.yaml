@@ -16,12 +16,12 @@ hardware:
     # Baud rate — must match the module setting (9600 / 19200 / 38400).
     # In TCP mode this is configured on the gateway web UI instead.
     baud_rate: 9600
-    # Decimal places encoded in the register value.
-    # Example: module calibrated in kg, 2 decimal places → raw 1234 = 12.34 kg
-    decimal_places: 0
-    # Multiply (raw / 10^decimal_places) by this to get grams.
-    # Use 1.0 if calibrated in grams, 1000.0 if calibrated in kg.
-    unit_to_grams: 1.0
+    # Decimal places shown on the scale module display (must match module setting).
+    # e.g. display shows 15.000 kg → decimal_places: 3
+    #      display shows 15.00 kg  → decimal_places: 2
+    decimal_places: 2
+    # Unit the scale module is calibrated in: g or kg
+    scale_unit: kg
     # Modbus reply timeout in seconds
     timeout: 1.0
     # Samples per second the pipeline loop will try to read

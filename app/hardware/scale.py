@@ -18,10 +18,11 @@ Register map (from module datasheet):
 Communication: Modbus RTU, 9600 baud (default), 8 data bits, 1 stop bit, no parity.
 
 Raw integer → grams conversion:
-    grams = (raw_int / 10 ** decimal_places) * unit_to_grams
+    value = raw_int / 10 ** decimal_places   ← places the decimal point
+    grams = value * _UNIT_TO_GRAMS[scale_unit]  ← converts to grams for DB storage
 
-Example: module calibrated in kg, 2 decimal places → decimal_places=2, unit_to_grams=1000.0
-         module calibrated in grams, 0 decimal places → decimal_places=0, unit_to_grams=1.0
+Example: scale set to kg, displaying 3 decimal places → decimal_places=3, scale_unit="kg"
+    register = 15000 → 15000 / 1000 = 15.000 kg → 15000.0 g stored in DB
 
 Verified against datasheet example:
   Request  01 03 00 00 00 02 C4 0B  → read regs 0-1
@@ -49,6 +50,9 @@ from app.config import AppConfig
 from app.utils import get_logger
 
 log = get_logger(__name__)
+
+# Conversion factors from scale display unit to grams
+_UNIT_TO_GRAMS: dict = {"g": 1.0, "kg": 1000.0}
 
 # Modbus register addresses (from datasheet)
 _REG_NET_WEIGHT    = 0   # Double word (regs 0–1): real-time net weight
@@ -110,10 +114,10 @@ class ModbusRTUScale:
         port:           Serial port path, e.g. ``/dev/ttyUSB0`` or ``COM3``.
         slave_address:  Modbus slave address of the module (default 1).
         baud_rate:      Serial baud rate — 9600 / 19200 / 38400 (default 9600).
-        decimal_places: Number of decimal places encoded in the register value.
-                        The raw integer is divided by ``10**decimal_places``.
-        unit_to_grams:  Multiplier to convert from the module's calibrated unit
-                        to grams (1.0 if grams, 1000.0 if kg).
+        decimal_places: Decimal places shown on the scale display / encoded in the
+                        register.  Must match the scale module's calibration setting.
+        scale_unit:     Unit the scale is calibrated in: ``"kg"`` or ``"g"``.
+                        Used to convert the reading to grams for internal storage.
         timeout:        Modbus reply timeout in seconds (default 1.0).
     """
 
@@ -123,8 +127,8 @@ class ModbusRTUScale:
         port: str,
         slave_address: int = 1,
         baud_rate: int = 9600,
-        decimal_places: int = 0,
-        unit_to_grams: float = 1.0,
+        decimal_places: int = 2,
+        scale_unit: str = "kg",
         timeout: float = 1.0,
     ):
         # Lazy import so non-Pi machines can import this module without
@@ -133,7 +137,7 @@ class ModbusRTUScale:
         import serial  # type: ignore[import-not-found]
 
         self._decimal_places = decimal_places
-        self._unit_to_grams = unit_to_grams
+        self._unit_to_grams = _UNIT_TO_GRAMS.get(scale_unit, 1.0)
 
         instrument = minimalmodbus.Instrument(port, slave_address)
         instrument.serial.baudrate = baud_rate
@@ -221,8 +225,9 @@ class ModbusTCPScale:
                         (e.g. ``"192.168.1.200"``).
         tcp_port:       TCP port — 502 in Modbus TCP↔RTU mode (recommended).
         slave_address:  Modbus slave address of the weight indicator (default 1).
-        decimal_places: Decimal places encoded in the register value.
-        unit_to_grams:  Multiplier from module unit to grams.
+        decimal_places: Decimal places shown on the scale display / encoded in the
+                        register.  Must match the scale module's calibration setting.
+        scale_unit:     Unit the scale is calibrated in: ``"kg"`` or ``"g"``.
         timeout:        Modbus reply timeout in seconds (default 1.0).
     """
 
@@ -232,8 +237,8 @@ class ModbusTCPScale:
         host: str,
         tcp_port: int = 502,
         slave_address: int = 1,
-        decimal_places: int = 0,
-        unit_to_grams: float = 1.0,
+        decimal_places: int = 2,
+        scale_unit: str = "kg",
         timeout: float = 1.0,
     ):
         # Lazy import — pymodbus is optional; serial-only deployments don't need it.
@@ -241,7 +246,7 @@ class ModbusTCPScale:
         from pymodbus.client import ModbusTcpClient  # type: ignore[import-not-found]
 
         self._decimal_places = decimal_places
-        self._unit_to_grams = unit_to_grams
+        self._unit_to_grams = _UNIT_TO_GRAMS.get(scale_unit, 1.0)
         self._slave_address = slave_address
         self._host = host
         self._tcp_port = tcp_port
@@ -445,7 +450,7 @@ def build_scale(cfg: AppConfig) -> Scale:
             tcp_port=sc.tcp_port,
             slave_address=sc.slave_address,
             decimal_places=sc.decimal_places,
-            unit_to_grams=sc.unit_to_grams,
+            scale_unit=sc.scale_unit,
             timeout=sc.timeout,
         )
     log.info(
@@ -457,7 +462,7 @@ def build_scale(cfg: AppConfig) -> Scale:
         slave_address=sc.slave_address,
         baud_rate=sc.baud_rate,
         decimal_places=sc.decimal_places,
-        unit_to_grams=sc.unit_to_grams,
+        scale_unit=sc.scale_unit,
         timeout=sc.timeout,
     )
 

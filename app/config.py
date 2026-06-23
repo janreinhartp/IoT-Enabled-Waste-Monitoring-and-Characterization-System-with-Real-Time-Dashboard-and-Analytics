@@ -25,12 +25,12 @@ class ScaleConfig:
     # Ignored when host is set (TCP mode); the baud rate is instead configured
     # on the RS485-to-Ethernet gateway itself (e.g. Waveshare RS485 TO ETH (B)).
     baud_rate: int = 9600
-    # Decimal places encoded in the register value.
-    # The raw integer is divided by 10**decimal_places before applying unit_to_grams.
-    decimal_places: int = 0
-    # Multiplier from the module's calibrated unit to grams.
-    # Use 1.0 if the module is calibrated in grams, 1000.0 if in kg.
-    unit_to_grams: float = 1.0
+    # Decimal places shown on the scale module's display / encoded in the register.
+    # Set this to match exactly what the scale module displays (e.g. 3 for 15.000 kg).
+    decimal_places: int = 2
+    # Unit the scale module is calibrated in: "kg" or "g".
+    # The driver uses this to convert the reading to grams for internal storage.
+    scale_unit: str = "kg"
     # Modbus reply timeout in seconds
     timeout: float = 1.0
     # Samples per second the pipeline loop will try to read
