@@ -123,9 +123,8 @@ class WebConfig:
     admin_username: str = "admin"
     admin_password: str = "admin"
     # Weight display unit shown in the UI.  "g" keeps grams; "kg" divides by 1000.
+    # Decimal places are taken automatically from hardware.scale.decimal_places.
     display_unit: str = "kg"
-    # Number of decimal places for displayed weights
-    display_decimals: int = 3
 
 
 @dataclass

@@ -83,11 +83,13 @@ def register(
     # can send the current value to freshly connected clients.
     _bin_state: dict = {"full": False}
 
-    # Weight display helpers — computed once from config
+    # Weight display helpers — computed once from config.
+    # Decimal places come from the scale hardware setting so there is only
+    # ONE place to configure them (hardware.scale.decimal_places).
     _UNIT_DIVISORS = {"g": 1.0, "kg": 1000.0}
     _w_symbol = cfg.web.display_unit
     _w_divisor = _UNIT_DIVISORS.get(cfg.web.display_unit, 1.0)
-    _w_decimals = cfg.web.display_decimals
+    _w_decimals = cfg.hardware.scale.decimal_places  # single source of truth
 
     @app.context_processor
     def _weight_display_ctx():
