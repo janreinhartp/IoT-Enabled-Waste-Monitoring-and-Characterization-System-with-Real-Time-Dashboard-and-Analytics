@@ -83,6 +83,24 @@ def register(
     # can send the current value to freshly connected clients.
     _bin_state: dict = {"full": False}
 
+    # Weight display helpers — computed once from config
+    _UNIT_DIVISORS = {"g": 1.0, "kg": 1000.0}
+    _w_symbol = cfg.web.display_unit
+    _w_divisor = _UNIT_DIVISORS.get(cfg.web.display_unit, 1.0)
+    _w_decimals = cfg.web.display_decimals
+
+    @app.context_processor
+    def _weight_display_ctx():
+        """Inject weight-formatting helpers into every Jinja template."""
+        def format_weight(grams: float) -> str:
+            return f"{grams / _w_divisor:.{_w_decimals}f} {_w_symbol}"
+        return {
+            "format_weight": format_weight,
+            "w_symbol": _w_symbol,
+            "w_divisor": _w_divisor,
+            "w_decimals": _w_decimals,
+        }
+
     # ---- Pages ----
 
     @app.get("/")

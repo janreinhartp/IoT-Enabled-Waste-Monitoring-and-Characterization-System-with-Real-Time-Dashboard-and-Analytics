@@ -2,6 +2,12 @@
   "use strict";
   const socket = io();
 
+  // Weight display unit from server config (injected into base.html)
+  const _W = window.WASTE_WEIGHT || { symbol: "g", divisor: 1, decimals: 1 };
+  function formatWeight(grams) {
+    return (grams / _W.divisor).toFixed(_W.decimals) + " " + _W.symbol;
+  }
+
   const liveWeightEl = document.getElementById("live-weight");
   const liveStateEl = document.getElementById("live-state");
   const scaleBarEl = document.getElementById("scale-status-bar");
@@ -19,7 +25,7 @@
   socket.on("weight", (msg) => {
     if (!liveWeightEl) return;
     const g = Number(msg.grams || 0);
-    liveWeightEl.innerHTML = g.toFixed(1) + ' <span class="unit">g</span>';
+    liveWeightEl.innerHTML = (g / _W.divisor).toFixed(_W.decimals) + ' <span class="unit">' + _W.symbol + '</span>';
   });
 
   const STATE_LABELS = {
@@ -41,7 +47,7 @@
     // State label
     let label;
     if (state === "idle") {
-      label = "⏳ Waiting — need ≥ " + s.min_weight_g + " g";
+      label = "⏳ Waiting — need ≥ " + formatWeight(s.min_weight_g);
     } else if (state === "stabilizing") {
       label = "📊 Stabilizing… (" + s.window_samples + " / " + s.stability_window + " samples)";
     } else {
@@ -63,8 +69,8 @@
     if (scaleDetailEl) {
       if (state === "stabilizing") {
         scaleDetailEl.textContent =
-          "Weight: " + s.weight_g + " g  |  Need " +
-          s.stability_window + " stable samples within ±" + s.stability_g + " g stddev";
+          "Weight: " + formatWeight(s.weight_g) + "  |  Need " +
+          s.stability_window + " stable samples within ±" + formatWeight(s.stability_g) + " stddev";
       } else {
         scaleDetailEl.textContent = "";
       }
@@ -88,7 +94,7 @@
       '<div class="latest-info">' +
       '<div class="latest-label">' + escapeHtml(e.detected_label) + '</div>' +
       '<div class="latest-cat">' + escapeHtml(e.waste_category) + '</div>' +
-      '<div class="latest-weight">' + Number(e.weight_grams).toFixed(1) + ' g</div>' +
+      '<div class="latest-weight">' + formatWeight(Number(e.weight_grams)) + '</div>' +
       '<div class="latest-conf">conf ' + Math.round((e.confidence || 0) * 100) + '%</div>' +
       '</div>';
   }
@@ -102,7 +108,7 @@
       '<td>' + escapeHtml(e.timestamp) + '</td>' +
       '<td>' + escapeHtml(e.detected_label) + '</td>' +
       '<td>' + escapeHtml(e.waste_category) + '</td>' +
-      '<td>' + Number(e.weight_grams).toFixed(1) + '</td>' +
+      '<td>' + formatWeight(Number(e.weight_grams)) + '</td>' +
       '<td>' + Math.round((e.confidence || 0) * 100) + '%</td>' +
       '<td><a href="/images/' + encodeURIComponent(e.id) + '" target="_blank">view</a></td>';
     tbody.insertBefore(tr, tbody.firstChild);
@@ -234,7 +240,7 @@
             setFeedback("Error: " + data.error, false);
             btnCommit.disabled = false;
           } else {
-            setFeedback("Recorded at " + data.weight_g + " g ✓", true);
+            setFeedback("Recorded at " + formatWeight(data.weight_g) + " ✓", true);
             setPendingUI({ pending: false });
           }
         })

@@ -1,6 +1,11 @@
 (function () {
   "use strict";
   const categories = window.WASTE_CATEGORIES || [];
+  // Weight display unit from server config (injected into base.html)
+  const _W = window.WASTE_WEIGHT || { symbol: "g", divisor: 1, decimals: 1 };
+  function formatWeight(grams) {
+    return (grams / _W.divisor).toFixed(_W.decimals) + " " + _W.symbol;
+  }
   const colorBySlug = Object.fromEntries(
     categories.map((c) => [c.slug, c.color || "#888"])
   );
@@ -15,8 +20,7 @@
   }
 
   function formatGrams(g) {
-    if (g >= 1000) return (g / 1000).toFixed(2) + " kg";
-    return g.toFixed(1) + " g";
+    return formatWeight(g);
   }
 
   async function loadStats() {
@@ -57,7 +61,7 @@
       data: {
         labels: hourly.map((d) => d.hour),
         datasets: [
-          { label: "Weight (g)", data: hourly.map((d) => d.weight_g), borderColor: "#047857", tension: 0.25, fill: false },
+          { label: "Weight (" + _W.symbol + ")", data: hourly.map((d) => d.weight_g / _W.divisor), borderColor: "#047857", tension: 0.25, fill: false },
           { label: "Items", data: hourly.map((d) => d.count), borderColor: "#f59e0b", tension: 0.25, fill: false, yAxisID: "y1" },
         ],
       },
@@ -65,7 +69,7 @@
         responsive: true,
         scales: {
           x: { title: { display: true, text: "Hour (UTC)" } },
-          y: { position: "left", title: { display: true, text: "Weight (g)" }, beginAtZero: true },
+          y: { position: "left", title: { display: true, text: "Weight (" + _W.symbol + ")" }, beginAtZero: true },
           y1: { position: "right", title: { display: true, text: "Items" }, beginAtZero: true, grid: { drawOnChartArea: false } },
         },
       },

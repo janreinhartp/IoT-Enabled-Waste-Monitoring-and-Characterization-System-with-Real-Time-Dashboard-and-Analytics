@@ -122,6 +122,10 @@ class WebConfig:
     # Admin credentials — protect the Settings page and DB reset
     admin_username: str = "admin"
     admin_password: str = "admin"
+    # Weight display unit shown in the UI.  "g" keeps grams; "kg" divides by 1000.
+    display_unit: str = "kg"
+    # Number of decimal places for displayed weights
+    display_decimals: int = 3
 
 
 @dataclass

@@ -123,6 +123,10 @@ web:
   # Admin credentials — required to access Settings and reset the database
   admin_username: admin
   admin_password: change-me-in-production
+  # Weight display unit: g (grams) or kg (kilograms)
+  display_unit: kg
+  # Decimal places for displayed weights
+  display_decimals: 3
 
 # ---- Storage ----
 storage:
