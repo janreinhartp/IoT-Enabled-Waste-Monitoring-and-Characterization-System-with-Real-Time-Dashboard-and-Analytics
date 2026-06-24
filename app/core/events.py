@@ -21,10 +21,16 @@ class PendingDetection:
     """An analyzed frame that has been captured and AI-processed but not yet
     weighed.  Created by :meth:`Pipeline.analyze_and_hold` (Analyze button)
     and consumed by :meth:`Pipeline.commit_pending` (Record button).
+
+    ``stable_weight_g`` is populated by the pipeline's main loop when a stable
+    placement is detected while this pending record is active (two-step flow).
+    ``commit_pending`` prefers this value over the raw live reading to ensure
+    the recorded weight is the settled mean rather than an instantaneous sample.
     """
 
     image_path: str
     detections: List[Detection]
+    stable_weight_g: Optional[float] = None
 
     def top(self) -> Optional[Detection]:
         """Return the highest-confidence detection, or None if empty."""

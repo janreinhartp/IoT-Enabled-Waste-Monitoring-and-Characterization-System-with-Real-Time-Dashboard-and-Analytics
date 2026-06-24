@@ -88,6 +88,7 @@ class Pipeline:
         self._preview_thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._latest_weight = 0.0
+        self._last_stable_weight: Optional[float] = None  # last settled reading from detector
         self._bin_full = False
         # Pending detection: set by analyze_and_hold(), consumed by commit_pending()
         self._pending: Optional[PendingDetection] = None
@@ -179,9 +180,16 @@ class Pipeline:
         )
 
         # Tare the scale so the next reading measures only this item's weight.
+        # Reset the stable-event detector so its window starts fresh from the
+        # new tare baseline — prevents pre-tare samples mixing with post-tare
+        # samples and producing a wrong stable-weight mean.
+        # Also clear _last_stable_weight so a stale reading from a previous
+        # placement cannot be committed if the user presses Record early.
         try:
             self._scale.tare()
-            log.info("analyze_and_hold: scale tared")
+            self._detector_state.reset()
+            self._last_stable_weight = None
+            log.info("analyze_and_hold: scale tared, detector reset, stable weight cleared")
         except Exception:  # noqa: BLE001
             log.warning("analyze_and_hold: tare command failed (continuing)")
 
@@ -206,7 +214,11 @@ class Pipeline:
                 return False
             self._pending = None  # consume immediately
 
-        g = self._latest_weight
+        # Prefer the stable mean weight captured by the auto-stable detector
+        # (populated in _run() when the scale settles after tare).  Fall back
+        # to the live reading so Commit still works when pressed quickly before
+        # the detector has had time to confirm stability.
+        g = pending.stable_weight_g if pending.stable_weight_g is not None else self._latest_weight
         log.info("commit_pending: recording pending detection at %.2f g (tared weight)", g)
         self._save_event_from_pending(pending, g)
         return True
@@ -232,11 +244,13 @@ class Pipeline:
             return False
 
     def record_now(self) -> None:
-        """Manually trigger a record at the current live weight.
+        """Record the current weight on demand (dashboard button or physical button).
 
         If a pending detection exists (Analyze was already pressed) it is
-        committed with the current weight.  Otherwise a fresh capture + detect
-        cycle runs (legacy behaviour — useful from the web dashboard).
+        committed via :meth:`commit_pending`.  Otherwise a fresh capture +
+        detect cycle runs using the most recent stable weight from the scale
+        detector, falling back to the live reading when the scale has not yet
+        settled since the last placement.
         """
         with self._pending_lock:
             has_pending = self._pending is not None
@@ -247,7 +261,8 @@ class Pipeline:
                 daemon=True,
             ).start()
         else:
-            weight = self._latest_weight
+            # Prefer the last stable (settled) weight; fall back to live reading.
+            weight = self._last_stable_weight if self._last_stable_weight is not None else self._latest_weight
             threading.Thread(
                 target=self._handle_event,
                 args=(weight,),
@@ -372,7 +387,25 @@ class Pipeline:
 
             event = self._detector_state.push(grams)
             if event is not None and not self._bin_full:
-                self._handle_event(event.weight_grams)
+                # Store the settled mean so record_now() and commit_pending()
+                # can use it.  Recording is ONLY triggered by an explicit user
+                # action (dashboard button or physical button) — never auto.
+                self._last_stable_weight = event.weight_grams
+                with self._pending_lock:
+                    if self._pending is not None:
+                        # Two-step flow: forward the stable weight to the pending
+                        # detection so commit_pending() uses the settled mean.
+                        self._pending.stable_weight_g = event.weight_grams
+                        log.info(
+                            "Scale stable at %.2f g — pending detection updated, "
+                            "waiting for Commit",
+                            event.weight_grams,
+                        )
+                    else:
+                        log.info(
+                            "Scale stable at %.2f g — waiting for Record button",
+                            event.weight_grams,
+                        )
 
             # Broadcast scale detector status for the dashboard
             if self._on_scale_status:

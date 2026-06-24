@@ -524,11 +524,18 @@ pip install -r requirements.txt -r requirements-pi.txt
 > **Note:** Raspberry Pi OS Bookworm/Trixie enforces an externally-managed Python environment.
 > Always use a venv — never install packages system-wide with `pip` on the Pi.
 
-### 4 — Download the TFLite model
+### 4 — Install the AI model
 
 ```bash
-python -m scripts.download_model
+python -m scripts.install_model
 ```
+
+This copies the bundled model files from `models/` (tracked in the repo) into
+`app/ai/models/` (the runtime location).  If `models/` is empty the script
+automatically downloads EfficientDet-Lite0 from TensorFlow Hub instead.
+
+To use your own model, place your `.tflite` and label `.txt` files in `models/`
+and commit them — anyone who clones the repo then runs the same command.
 
 ### 5 — Configure
 

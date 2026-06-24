@@ -8,11 +8,14 @@ venv/
 .coverage
 htmlcov/
 
-# App data (database, captured images, models)
+# App data (database, captured images)
 data/*.db
 data/*.sqlite*
 data/images/*
 !data/images/.gitkeep
+
+# Runtime model directory — populated by  python -m scripts.install_model
+# Source model files live in  models/  (repo root) and ARE tracked by git.
 app/ai/models/*.tflite
 app/ai/models/*.txt
 

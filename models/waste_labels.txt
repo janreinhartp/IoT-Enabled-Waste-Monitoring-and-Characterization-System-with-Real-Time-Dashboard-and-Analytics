@@ -1,0 +1,2 @@
+0 plastic
+1 paper
