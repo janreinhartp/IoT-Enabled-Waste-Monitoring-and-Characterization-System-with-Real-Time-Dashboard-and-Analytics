@@ -1,4 +1,4 @@
-# IoT-Enabled Waste Monitoring and Characterization System
+﻿# IoT-Enabled Waste Monitoring and Characterization System
 
 An IoT system that **weighs** an item placed on a load-cell scale, **identifies** it with computer vision, **categorizes** it (plastic, paper, metal, glass, organic), **stores** the event locally, and shows it in a **real-time web dashboard** with analytics — all running on a Raspberry Pi.
 
@@ -354,6 +354,9 @@ Background loops (always running):
 ├── config.example.yaml          # copy to config.yaml and edit
 ├── requirements.txt             # base deps (work on any OS) — includes minimalmodbus + pyserial
 ├── requirements-pi.txt          # Pi-only deps — ai-edge-litert, RPLCD, smbus2, RPi.GPIO
+├── models/                      # AI model files tracked by git
+│   ├── waste_classifier.tflite  # bundled custom waste classifier (TFLite)
+│   └── waste_labels.txt         # class labels for the bundled model
 ├── app/
 │   ├── config.py                # YAML config loader — ScaleConfig, LCDConfig, ButtonConfig
 │   ├── hardware/
@@ -363,6 +366,7 @@ Background loops (always running):
 │   │   ├── button.py            # ButtonWatcher / MockButton — GPIO edge detection
 │   │   └── mock.py              # MockScale, MockCamera (development without Pi)
 │   ├── ai/                      # Detector interface, TFLite impl, label maps
+│   │   └── models/              # runtime model location — populated by install_model (gitignored)
 │   ├── core/
 │   │   ├── pipeline.py          # Orchestration — analyze_and_hold(), commit_pending()
 │   │   ├── db.py                # SQLAlchemy models + queries
@@ -378,6 +382,7 @@ Background loops (always running):
 │   └── utils/                   # logging
 ├── scripts/
 │   ├── calibrate_scale.py       # interactive zero + weight-point calibration via Modbus
+│   ├── install_model.py         # copies models/ → app/ai/models/ (falls back to download)
 │   ├── download_model.py        # fetches EfficientDet-Lite0 TFLite model
 │   └── install_service.sh       # installs + enables the systemd service
 ├── tests/                       # pytest suite (uses mock hardware)
@@ -526,16 +531,60 @@ pip install -r requirements.txt -r requirements-pi.txt
 
 ### 4 — Install the AI model
 
+Run from the project root (with the venv active):
+
 ```bash
 python -m scripts.install_model
 ```
 
-This copies the bundled model files from `models/` (tracked in the repo) into
-`app/ai/models/` (the runtime location).  If `models/` is empty the script
-automatically downloads EfficientDet-Lite0 from TensorFlow Hub instead.
+#### What the script does
 
-To use your own model, place your `.tflite` and label `.txt` files in `models/`
-and commit them — anyone who clones the repo then runs the same command.
+1. Looks for `.tflite` and `.txt` files inside the `models/` directory at the
+   repository root (these are tracked by git and ship with the repo).
+2. Copies every file it finds into `app/ai/models/` — the runtime location that
+   the app reads at startup.
+3. If `models/` contains no model files (e.g. a fresh clone before any model was
+   committed) the script automatically downloads **EfficientDet-Lite0** from
+   TensorFlow Hub as a fallback and saves it to `app/ai/models/`.
+
+#### Expected output — bundled model present
+
+```
+Installing AI model files into app\ai\models …
+
+  copied  models\waste_classifier.tflite  →  app\ai\models\waste_classifier.tflite
+  copied  models\waste_labels.txt         →  app\ai\models\waste_labels.txt
+
+Done — 2 file(s) installed.
+```
+
+#### Expected output — no bundled model (fallback download)
+
+```
+Installing AI model files into app\ai\models …
+
+No model files found in models/ — downloading EfficientDet-Lite0 from TensorFlow Hub …
+  downloading https://storage.googleapis.com/…/lite-model_efficientdet_lite0_…tflite
+  saved app\ai\models\efficientdet_lite0.tflite (4,563,519 bytes)
+  downloading https://raw.githubusercontent.com/…/coco_labels.txt
+  saved app\ai\models\coco_labels.txt (661 bytes)
+
+Done. Set  ai.backend: tflite  in config.yaml to use the model.
+```
+
+#### Verify the files are in place
+
+```bash
+ls app/ai/models/
+```
+
+You should see at least one `.tflite` file and one `.txt` labels file.
+
+#### Re-running
+
+The script is safe to run more than once — it overwrites the destination files
+each time, so you can use it to update the installed model after committing a
+new version to `models/`.
 
 ### 5 — Configure
 
@@ -573,19 +622,22 @@ hardware:
 Find the line that says `backend: mock` and change it to the AI backend you want to use:
 
 ```yaml
-# Option A — EfficientDet-Lite0 COCO model (downloaded in step 4)
-ai:
-  backend: tflite
-  model_path: app/ai/models/efficientdet_lite0.tflite
-  labels_path: app/ai/models/coco_labels.txt
-  input_size: 320
-
-# Option B — Your own Teachable Machine model (see „Training a Waste Classifier“ below)
+# Option A — Bundled custom waste classifier (installed in step 4 from models/)
+#            Recommended — the model ships with the repo, no download needed.
 ai:
   backend: classification
   model_path: app/ai/models/waste_classifier.tflite
   labels_path: app/ai/models/waste_labels.txt
   input_size: 224
+  min_confidence: 0.6
+
+# Option B — EfficientDet-Lite0 COCO generic object detector
+#            Used as fallback when install_model downloads from TensorFlow Hub.
+ai:
+  backend: tflite
+  model_path: app/ai/models/efficientdet_lite0.tflite
+  labels_path: app/ai/models/coco_labels.txt
+  input_size: 320
 ```
 
 > **What is a YAML file?** It is a plain settings file. Each line is `setting-name: value`.  
@@ -1038,20 +1090,41 @@ You receive a `.zip` file containing:
 - `model.tflite` — the trained model
 - `labels.txt` — one class name per line
 
-### Step 4 — Deploy to the Pi
+### Step 4 — Add the model to the repo and install it
 
-Copy both files to the Pi:
+Instead of copying the model directly to the runtime directory, place it in the
+`models/` folder at the repository root and commit it. This way the model travels
+with the code and anyone who clones the repo gets it automatically.
+
+**On your development machine:**
 
 ```powershell
 # Windows — from the project root
-scp model.tflite pi@waste-monitoring-v2.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/waste_classifier.tflite
-scp labels.txt   pi@waste-monitoring-v2.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/waste_labels.txt
+Copy-Item model.tflite models\waste_classifier.tflite
+Copy-Item labels.txt   models\waste_labels.txt
+git add models/waste_classifier.tflite models/waste_labels.txt
+git commit -m "Add trained waste classifier model"
+git push
 ```
 
 ```bash
 # macOS / Linux
-scp model.tflite labels.txt pi@waste-monitoring-v2.local:~/IoT-Enabled-Waste-Monitoring-and-Characterization-System-with-Real-Time-Dashboard-and-Analytics/app/ai/models/
+cp model.tflite models/waste_classifier.tflite
+cp labels.txt   models/waste_labels.txt
+git add models/waste_classifier.tflite models/waste_labels.txt
+git commit -m "Add trained waste classifier model"
+git push
 ```
+
+**On the Pi** — pull the latest commit and run the install script:
+
+```bash
+git pull
+python -m scripts.install_model
+```
+
+This copies `models/waste_classifier.tflite` and `models/waste_labels.txt` into
+`app/ai/models/` (the runtime location read by the app).
 
 ### Step 5 — Update config.yaml
 
