@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
             lcd=lcd,
             on_event=lambda rec: broadcast_event(socketio, rec.to_dict()),
             on_weight=lambda g: broadcast_weight(socketio, g),
-            on_bin_status=lambda full: broadcast_bin_status(app, socketio, full),
+            on_bin_status=lambda full, total_g: broadcast_bin_status(app, socketio, full, total_g),
             on_scale_status=lambda s: broadcast_scale_status(socketio, s),
             on_ai_preview=lambda dets: broadcast_ai_preview(socketio, dets),
         )

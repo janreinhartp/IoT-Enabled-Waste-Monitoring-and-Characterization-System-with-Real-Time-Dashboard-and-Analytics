@@ -153,6 +153,14 @@ class Database:
 
     # ---- Query helpers ----
 
+    def total_weight_g(self) -> float:
+        """Return the sum of all recorded event weights in grams."""
+        with self.session() as s:
+            result = s.execute(
+                select(func.coalesce(func.sum(WasteEvent.weight_grams), 0.0))
+            ).scalar_one()
+            return float(result)
+
     def insert_event(
         self,
         *,

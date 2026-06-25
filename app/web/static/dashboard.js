@@ -19,9 +19,18 @@
 
   // ---- Bin Full Alert ----
   let _binFull = false;
+  let _totalWeightG = 0;
+  let _capacityKg = 0;
+  const binFullTotalEl = document.getElementById("bin-full-total");
 
-  function setBinFull(isFull) {
+  function setBinFull(isFull, totalWeightG, capacityKg) {
     _binFull = isFull;
+    if (totalWeightG !== undefined) _totalWeightG = totalWeightG;
+    if (capacityKg !== undefined) _capacityKg = capacityKg;
+    if (binFullTotalEl) {
+      binFullTotalEl.textContent =
+        formatWeight(_totalWeightG) + " / " + _capacityKg + " kg";
+    }
     if (binFullAlert) {
       if (isFull) {
         binFullAlert.style.display = "";
@@ -63,11 +72,11 @@
   // Fetch initial bin status on page load
   fetch("/api/bin_status")
     .then((r) => r.json())
-    .then((data) => setBinFull(!!data.bin_full))
+    .then((data) => setBinFull(!!data.bin_full, data.total_weight_g, data.capacity_kg))
     .catch(() => {});
 
-  socket.on("bin_status", (data) => setBinFull(!!data.bin_full));
-  socket.on("snapshot", (data) => setBinFull(!!data.bin_full));
+  socket.on("bin_status", (data) => setBinFull(!!data.bin_full, data.total_weight_g));
+  socket.on("snapshot", (data) => setBinFull(!!data.bin_full, data.total_weight_g, data.capacity_kg));
 
   socket.on("connect", () => {
     if (liveStateEl) liveStateEl.textContent = "connected";

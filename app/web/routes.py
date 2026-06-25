@@ -200,15 +200,21 @@ def register(
 
     @app.get("/api/bin_status")
     def api_bin_status():
+        pipeline = app.config.get("WASTE_PIPELINE")
+        total_g = pipeline.total_recorded_weight_g if pipeline else db.total_weight_g()
         return jsonify({
             "bin_full": _bin_state["full"],
             "capacity_kg": cfg.events.capacity_kg,
+            "total_weight_g": round(total_g, 1),
         })
 
     @app.post("/api/reset_db")
     @_require_admin_api
     def api_reset_db():
         deleted = db.reset_events()
+        pipeline = app.config.get("WASTE_PIPELINE")
+        if pipeline:
+            pipeline.reset_total_weight()
         return jsonify({"deleted": deleted, "status": "ok"})
 
     @app.get("/api/settings/capacity")
@@ -428,10 +434,13 @@ def register(
     def on_connect():  # noqa: D401 - Socket.IO handler
         # Send a snapshot of recent state to a freshly connected client.
         recent = [e.to_dict() for e in db.list_events(limit=10)]
+        pipeline = app.config.get("WASTE_PIPELINE")
+        total_g = pipeline.total_recorded_weight_g if pipeline else db.total_weight_g()
         socketio.emit("snapshot", {
             "recent": recent,
             "bin_full": _bin_state["full"],
             "capacity_kg": cfg.events.capacity_kg,
+            "total_weight_g": round(total_g, 1),
         })
 
     # Expose _bin_state so broadcast_bin_status (below) can mutate it.
@@ -448,12 +457,12 @@ def broadcast_weight(socketio: SocketIO, grams: float) -> None:
     socketio.emit("weight", {"grams": grams})
 
 
-def broadcast_bin_status(app: Flask, socketio: SocketIO, is_full: bool) -> None:
+def broadcast_bin_status(app: Flask, socketio: SocketIO, is_full: bool, total_weight_g: float = 0.0) -> None:
     """Push a bin-full / bin-emptied status change to all connected clients."""
     bin_state = app.config.get("_bin_state")
     if bin_state is not None:
         bin_state["full"] = is_full
-    socketio.emit("bin_status", {"bin_full": is_full})
+    socketio.emit("bin_status", {"bin_full": is_full, "total_weight_g": round(total_weight_g, 1)})
 
 
 def broadcast_scale_status(socketio: SocketIO, status: dict) -> None:

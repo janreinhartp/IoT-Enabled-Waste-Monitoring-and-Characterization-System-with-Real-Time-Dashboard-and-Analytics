@@ -29,7 +29,8 @@ except Exception:  # noqa: BLE001
 
 EventCallback = Callable[[WasteEventRecord], None]
 WeightCallback = Callable[[float], None]
-BinStatusCallback = Callable[[bool], None]
+# Receives (is_full, total_recorded_weight_g)
+BinStatusCallback = Callable[[bool, float], None]
 ScaleStatusCallback = Callable[[dict], None]
 AIPreviewCallback = Callable[[list], None]
 
@@ -90,6 +91,10 @@ class Pipeline:
         self._latest_weight = 0.0
         self._last_stable_weight: Optional[float] = None  # last settled reading from detector
         self._bin_full = False
+        # Running total of all recorded event weights (grams), initialised from DB.
+        # Updated in _save_event_from_pending; used for the bin-capacity check so
+        # the check is based on accumulated recorded weight, not the live scale reading.
+        self._total_recorded_weight_g: float = db.total_weight_g()
         # Pending detection: set by analyze_and_hold(), consumed by commit_pending()
         self._pending: Optional[PendingDetection] = None
         self._pending_lock = threading.Lock()
@@ -133,6 +138,15 @@ class Pipeline:
     @property
     def bin_full(self) -> bool:
         return self._bin_full
+
+    @property
+    def total_recorded_weight_g(self) -> float:
+        """Cumulative weight of all recorded events in grams."""
+        return self._total_recorded_weight_g
+
+    def reset_total_weight(self) -> None:
+        """Reset the cached total to zero (call after DB reset)."""
+        self._total_recorded_weight_g = 0.0
 
     @property
     def pending_detection(self) -> Optional[PendingDetection]:
@@ -224,6 +238,15 @@ class Pipeline:
         g = pending.stable_weight_g if pending.stable_weight_g is not None else self._latest_weight
         log.info("commit_pending: recording pending detection at %.2f g (tared weight)", g)
         self._save_event_from_pending(pending, g)
+        # Cancel tare so the scale resumes reading the gross (totalizing) weight.
+        # This restores the live-weight display to the cumulative bin weight and
+        # keeps the bin-capacity check accurate between placements.
+        try:
+            self._scale.cancel_tare()
+            self._detector_state.reset()
+            log.info("commit_pending: tare cancelled — scale restored to gross weight")
+        except Exception:  # noqa: BLE001
+            log.warning("commit_pending: cancel-tare failed (scale may still be tared)")
         return True
 
     def clear_pending(self) -> None:
@@ -345,7 +368,6 @@ class Pipeline:
         rate = max(1, int(self._cfg.hardware.scale.sample_rate_hz))
         interval = 1.0 / rate
         last_broadcast = 0.0
-        capacity_g = self._cfg.events.capacity_kg * 1000.0
 
         while not self._stop.is_set():
             t0 = time.monotonic()
@@ -373,9 +395,10 @@ class Pipeline:
                     log.exception("on_weight callback failed")
                 last_broadcast = t0
 
-            # --- Bin capacity check ---
+            # --- Bin capacity check (uses cumulative DB total, not live reading) ---
             was_full = self._bin_full
-            self._bin_full = grams >= capacity_g
+            capacity_g = self._cfg.events.capacity_kg * 1000.0
+            self._bin_full = self._total_recorded_weight_g >= capacity_g
             if self._bin_full != was_full:
                 if self._bin_full:
                     log.warning(
@@ -397,7 +420,7 @@ class Pipeline:
                             log.exception("LCD bin-cleared message failed")
                 if self._on_bin_status:
                     try:
-                        self._on_bin_status(self._bin_full)
+                        self._on_bin_status(self._bin_full, self._total_recorded_weight_g)
                     except Exception:  # noqa: BLE001
                         log.exception("on_bin_status callback failed")
 
@@ -464,6 +487,13 @@ class Pipeline:
 
         pending = PendingDetection(image_path=image_path or "", detections=detections)
         self._save_event_from_pending(pending, weight_g)
+        # Cancel tare so the scale resumes gross-weight (totalizing) mode.
+        try:
+            self._scale.cancel_tare()
+            self._detector_state.reset()
+            log.info("_handle_event: tare cancelled — scale restored to gross weight")
+        except Exception:  # noqa: BLE001
+            log.warning("_handle_event: cancel-tare failed")
 
     def _save_event_from_pending(self, pending: PendingDetection, weight_g: float) -> None:
         """Persist DB rows and fire callbacks for a completed detection + weight."""
@@ -483,6 +513,7 @@ class Pipeline:
                 confidence=detection.confidence,
                 image_path=image_path,
             )
+            self._total_recorded_weight_g += record.weight_grams
             log.info(
                 "Recorded event #%d: %s (%s) %.0f g conf=%.2f",
                 record.id,
