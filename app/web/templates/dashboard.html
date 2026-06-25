@@ -2,6 +2,17 @@
 {% block title %}Dashboard - Waste Monitor{% endblock %}
 
 {% block content %}
+
+{# ---- Bin Full Alert ---- #}
+<div id="bin-full-alert" class="bin-full-alert" style="display:none" role="alert" aria-live="assertive">
+  <span class="bin-full-icon">🗑️</span>
+  <div class="bin-full-text">
+    <strong>Bin is Full!</strong>
+    <span>The total weight has reached the maximum capacity. Please empty the bin before adding more items.</span>
+  </div>
+  <button id="bin-full-dismiss" class="bin-full-dismiss" title="Dismiss">✕</button>
+</div>
+
 <section class="grid">
   <div class="card live-weight">
     <div class="label">Live Weight</div>

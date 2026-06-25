@@ -102,3 +102,15 @@ canvas { max-width: 100%; }
 .det-conf { margin-left: auto; font-size: 0.8rem; color: #6b7280; }
 .det-conf-low { color: #f97316; }
 .det-none { font-size: 0.85rem; color: #ef4444; }
+/* ---- Bin Full Alert ---- */
+.bin-full-alert { display: flex; align-items: center; gap: 1rem; background: #fef2f2; border: 2px solid #f87171; border-radius: 0.75rem; padding: 1rem 1.25rem; margin-bottom: 1.25rem; }
+.bin-full-icon { font-size: 2rem; flex-shrink: 0; }
+.bin-full-text { flex: 1; }
+.bin-full-text strong { display: block; font-size: 1.05rem; color: #b91c1c; margin-bottom: 0.2rem; }
+.bin-full-text span { font-size: 0.92rem; color: #7f1d1d; }
+.bin-full-dismiss { flex-shrink: 0; background: none; border: 1px solid #f87171; color: #b91c1c; border-radius: 0.4rem; padding: 0.25rem 0.6rem; font-size: 0.9rem; cursor: pointer; }
+.bin-full-dismiss:hover { background: #fee2e2; }
+@keyframes bin-full-flash { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 0 8px rgba(239,68,68,0); } }
+.bin-full-pulse { animation: bin-full-flash 0.7s ease-out; }
+/* ---- Settings capacity row ---- */
+.capacity-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }

@@ -127,6 +127,7 @@ def register(
         return render_template(
             "settings.html",
             event_count=event_count,
+            capacity_kg=cfg.events.capacity_kg,
         )
 
     # ---- Auth ----
@@ -209,6 +210,35 @@ def register(
     def api_reset_db():
         deleted = db.reset_events()
         return jsonify({"deleted": deleted, "status": "ok"})
+
+    @app.get("/api/settings/capacity")
+    @_require_admin_api
+    def api_get_capacity():
+        return jsonify({"capacity_kg": cfg.events.capacity_kg})
+
+    @app.post("/api/settings/capacity")
+    @_require_admin_api
+    def api_set_capacity():
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            value = float(data.get("capacity_kg", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "capacity_kg must be a number"}), 400
+        if value <= 0:
+            return jsonify({"error": "capacity_kg must be greater than 0"}), 400
+        cfg.events.capacity_kg = value
+        # Persist to config.yaml so the change survives restarts
+        import yaml as _yaml
+        config_path = "config.yaml"
+        try:
+            with open(config_path, "r", encoding="utf-8") as fh:
+                raw = _yaml.safe_load(fh) or {}
+            raw.setdefault("events", {})["capacity_kg"] = value
+            with open(config_path, "w", encoding="utf-8") as fh:
+                _yaml.dump(raw, fh, default_flow_style=False, allow_unicode=True)
+        except Exception:  # noqa: BLE001
+            pass  # in-memory update succeeded; file write is best-effort
+        return jsonify({"status": "ok", "capacity_kg": value})
 
     @app.post("/api/record")
     def api_record():

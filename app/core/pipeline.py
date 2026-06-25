@@ -156,6 +156,9 @@ class Pipeline:
         Returns the :class:`PendingDetection` on success, or ``None`` when
         the camera is unavailable or nothing is detected.
         """
+        if self._bin_full:
+            log.warning("analyze_and_hold: blocked — bin is full")
+            return None
         log.info("analyze_and_hold: capturing frame")
         frame = self._safe_capture()
         if frame is None:
@@ -252,6 +255,9 @@ class Pipeline:
         detector, falling back to the live reading when the scale has not yet
         settled since the last placement.
         """
+        if self._bin_full:
+            log.warning("record_now: blocked — bin is full")
+            return
         with self._pending_lock:
             has_pending = self._pending is not None
         if has_pending:
@@ -377,8 +383,18 @@ class Pipeline:
                         "No new events until bin is emptied.",
                         grams, capacity_g,
                     )
+                    if self._lcd:
+                        try:
+                            self._lcd.show_message("!! BIN FULL !!  ", "Empty bin now   ")
+                        except Exception:  # noqa: BLE001
+                            log.exception("LCD bin-full message failed")
                 else:
                     log.info("Bin emptied (%.0f g). Resuming event detection.", grams)
+                    if self._lcd:
+                        try:
+                            self._lcd.show_message("Bin cleared     ", "Ready           ")
+                        except Exception:  # noqa: BLE001
+                            log.exception("LCD bin-cleared message failed")
                 if self._on_bin_status:
                     try:
                         self._on_bin_status(self._bin_full)

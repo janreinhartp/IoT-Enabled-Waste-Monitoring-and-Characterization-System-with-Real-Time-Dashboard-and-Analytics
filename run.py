@@ -86,6 +86,11 @@ def main(argv: list[str] | None = None) -> int:
         # ---- Analyze button: capture + AI — do NOT save yet ----
         def _on_analyze_press():
             log.info("Analyze button pressed")
+            if pipeline.bin_full:
+                log.warning("Analyze button ignored — bin is full")
+                if lcd:
+                    lcd.show_message("!! BIN FULL !!  ", "Empty bin now   ")
+                return
             if lcd:
                 lcd.show_message("Analyzing...  ", "Please wait... ")
             pending = pipeline.analyze_and_hold()
@@ -99,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
         # ---- Record button: commit pending detection + weight — saves to DB ----
         def _on_record_press():
             log.info("Record button pressed — committing pending detection")
+            if pipeline.bin_full:
+                log.warning("Record button ignored — bin is full")
+                if lcd:
+                    lcd.show_message("!! BIN FULL !!  ", "Empty bin now   ")
+                return
             if lcd:
                 lcd.show_message("Recording...  ", "Please wait... ")
             ok = pipeline.commit_pending()

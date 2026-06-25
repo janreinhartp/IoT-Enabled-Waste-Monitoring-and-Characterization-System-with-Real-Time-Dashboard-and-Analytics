@@ -14,6 +14,60 @@
   const scaleDetailEl = document.getElementById("scale-status-detail");
   const latestCard = document.getElementById("latest-card");
   const tbody = document.querySelector("#events-table tbody");
+  const binFullAlert = document.getElementById("bin-full-alert");
+  const binFullDismiss = document.getElementById("bin-full-dismiss");
+
+  // ---- Bin Full Alert ----
+  let _binFull = false;
+
+  function setBinFull(isFull) {
+    _binFull = isFull;
+    if (binFullAlert) {
+      if (isFull) {
+        binFullAlert.style.display = "";
+        binFullAlert.classList.remove("bin-full-pulse");
+        void binFullAlert.offsetWidth; // force reflow
+        binFullAlert.classList.add("bin-full-pulse");
+      } else {
+        binFullAlert.style.display = "none";
+        binFullAlert.classList.remove("bin-full-pulse");
+      }
+    }
+    // Disable Analyze and Record buttons while bin is full
+    if (btnAnalyze) {
+      btnAnalyze.disabled = isFull;
+      btnAnalyze.title = isFull
+        ? "Bin is full — empty the bin before analyzing new items"
+        : "Step 1 — Point item at camera and capture + detect (scale is tared automatically)";
+    }
+    if (btnCommit) {
+      // Only re-enable Record when bin is no longer full AND a pending detection exists
+      if (isFull) {
+        btnCommit.disabled = true;
+        btnCommit.title = "Bin is full — empty the bin before recording";
+      } else {
+        // Restore normal pending-based disabled state
+        const hasPending = btnCommit.dataset.hasPending === "true";
+        btnCommit.disabled = !hasPending;
+        btnCommit.title = "Step 2 — Place item on scale (already tared), wait for stable weight, then click";
+      }
+    }
+  }
+
+  if (binFullDismiss) {
+    binFullDismiss.addEventListener("click", () => {
+      if (binFullAlert) binFullAlert.style.display = "none";
+    });
+  }
+
+  // Fetch initial bin status on page load
+  fetch("/api/bin_status")
+    .then((r) => r.json())
+    .then((data) => setBinFull(!!data.bin_full))
+    .catch(() => {});
+
+  socket.on("bin_status", (data) => setBinFull(!!data.bin_full));
+  socket.on("snapshot", (data) => setBinFull(!!data.bin_full));
 
   socket.on("connect", () => {
     if (liveStateEl) liveStateEl.textContent = "connected";
@@ -180,7 +234,9 @@
   function setPendingUI(pending) {
     if (!btnCommit) return;
     if (pending && pending.pending) {
-      btnCommit.disabled = false;
+      btnCommit.dataset.hasPending = "true";
+      // Only enable if bin is not full
+      btnCommit.disabled = _binFull;
       if (btnClearPend) btnClearPend.style.display = "";
       if (pendingPreview) pendingPreview.style.display = "";
       if (pendingLabelEl) pendingLabelEl.textContent = pending.label || "unknown";
@@ -191,6 +247,7 @@
         pendingImgEl.style.display = "";
       }
     } else {
+      btnCommit.dataset.hasPending = "false";
       btnCommit.disabled = true;
       if (btnClearPend) btnClearPend.style.display = "none";
       if (pendingPreview) pendingPreview.style.display = "none";
